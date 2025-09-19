@@ -1,0 +1,287 @@
+
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Beyanname Analiz Aracı</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* Light Theme (Default) */
+    :root {
+      --color-background: #f0f2f5; /* Slightly darker background for better contrast */
+      --color-background-light: #ffffff; /* Cards are now pure white */
+      --color-border: #e0e2e7; /* Adjusted border color */
+      --color-text-primary: #1f2937;
+      --color-text-secondary: #4b5563;
+      --color-text-muted: #9ca3af;
+      --color-accent: #e5202b; /* Reverted to red accent */
+      --color-accent-hover: #c51a24; /* Reverted to red accent */
+      --color-accent-glow: rgba(229, 32, 43, 0.2); /* Reverted to red accent */
+      --color-success: #16a34a;
+      --color-danger: #dc2626;
+      --color-warning: #f59e0b;
+    }
+
+    /* Dark Theme */
+    html.dark {
+      --color-background: #111111;
+      --color-background-light: #1d1d1d;
+      --color-border: #333333;
+      --color-text-primary: #f0f6fc;
+      --color-text-secondary: #c9d1d9;
+      --color-text-muted: #8b949e;
+      --color-accent: #e5202b;
+      --color-accent-hover: #c51a24;
+      --color-accent-glow: rgba(229, 32, 43, 0.4);
+    }
+    
+    body {
+      background-color: var(--color-background);
+      color: var(--color-text-primary);
+      font-family: 'Poppins', sans-serif;
+      overflow-x: hidden;
+      transition: background-color 0.3s ease, color 0.3s ease;
+    }
+
+    html.dark body {
+        background-image: radial-gradient(circle at top left, rgba(229, 32, 43, 0.08), transparent 30%);
+    }
+
+    html:not(.dark) body {
+        background-image: radial-gradient(circle at top left, rgba(229, 32, 43, 0.05), transparent 40%);
+    }
+
+    .animate-fade-in {
+      animation: fadeIn 0.5s ease-in-out forwards;
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    .animate-pop-in-out {
+      animation: pop-in-out 0.7s ease-in-out forwards;
+    }
+
+    @keyframes pop-in-out {
+      0%, 100% {
+        opacity: 0;
+      }
+      50% {
+        opacity: 1;
+      }
+    }
+    
+    .modern-card {
+      background-color: var(--color-background-light);
+      border: 1px solid var(--color-border);
+      position: relative;
+      overflow: hidden;
+      transition: all 0.3s ease;
+    }
+
+    .modern-card:hover {
+       border-color: rgba(229, 32, 43, 0.4);
+       box-shadow: 0 0 25px rgba(229, 32, 43, 0.1);
+    }
+
+    html.dark .modern-card:hover {
+       border-color: rgba(229, 32, 43, 0.4);
+       box-shadow: 0 0 25px rgba(229, 32, 43, 0.1);
+    }
+    
+    .modern-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: radial-gradient(circle at 50% 50%, var(--color-accent-glow), transparent 70%);
+      opacity: 0;
+      transition: opacity 0.5s ease;
+      pointer-events: none;
+    }
+
+    .modern-card:hover::before {
+      opacity: 0.3;
+    }
+
+    .btn {
+      padding: 0.75rem 1.5rem;
+      border-radius: 0.5rem;
+      font-weight: 600;
+      transition: all 0.2s ease-in-out;
+      border: none;
+      cursor: pointer;
+      text-align: center;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+    
+    .btn-primary {
+      background: var(--color-accent);
+      color: white;
+      box-shadow: 0 4px 15px -5px var(--color-accent-glow);
+    }
+
+    .btn-primary:hover {
+      background: var(--color-accent-hover);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px -5px var(--color-accent-glow);
+    }
+    
+    .btn-primary:disabled {
+        background: var(--color-text-muted);
+        box-shadow: none;
+        transform: none;
+        cursor: not-allowed;
+    }
+
+    .btn-secondary {
+      background-color: var(--color-border);
+      color: var(--color-text-primary);
+    }
+    .btn-secondary:hover {
+      background-color: var(--color-text-muted);
+      color: var(--color-background-light);
+    }
+    html.dark .btn-secondary:hover {
+        color: var(--color-text-primary);
+    }
+
+
+    .btn-danger {
+      background-color: var(--color-danger);
+      color: white;
+    }
+     .btn-danger:hover {
+      background-color: #c5303e; /* Darker danger */
+    }
+    
+    .btn-danger:disabled {
+        background-color: var(--color-text-muted);
+        cursor: not-allowed;
+    }
+
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: var(--color-background);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--color-border);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--color-text-muted);
+    }
+    
+    mark {
+        background-color: #facc15; /* A bright yellow */
+        color: #1c1917; /* Dark text for contrast */
+        padding: 2px 4px;
+        border-radius: 3px;
+        font-weight: 600;
+    }
+    html.dark mark {
+        background-color: #facc15;
+        color: #1c1917;
+    }
+    
+    /* Custom Select Component */
+    .custom-select-button {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+      background-color: var(--color-background);
+      border: 1px solid var(--color-border);
+      border-radius: 0.5rem; /* rounded-lg */
+      text-align: left;
+      color: var(--color-text-primary);
+      transition: all 0.2s ease;
+      font-size: 0.875rem; /* text-sm */
+    }
+    .history-page-select .custom-select-button {
+       padding: 0.5rem 0.75rem; /* py-2 pl-3 */
+    }
+    .fullscreen-page-select .custom-select-button {
+        padding: 0.375rem 0.5rem; /* py-1.5 pl-2 */
+    }
+
+    .custom-select-button:focus, .custom-select-button[aria-expanded="true"] {
+      outline: none;
+      border-color: var(--color-accent);
+      box-shadow: 0 0 0 2px var(--color-accent-glow);
+    }
+    .custom-select-button svg {
+        transition: transform 0.2s ease;
+    }
+    .custom-select-button[aria-expanded="true"] svg {
+        transform: rotate(180deg);
+    }
+    .custom-select-options {
+      position: absolute;
+      top: calc(100% + 0.5rem);
+      left: 0;
+      right: 0;
+      background-color: var(--color-background-light);
+      border: 1px solid var(--color-border);
+      border-radius: 0.5rem;
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+      z-index: 50;
+      max-height: 200px;
+      overflow-y: auto;
+      list-style: none;
+      padding: 0.5rem;
+      animation: fadeIn 0.1s ease-out;
+    }
+    html.dark .custom-select-options {
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
+    }
+    .custom-select-option {
+      padding: 0.5rem 0.75rem;
+      border-radius: 0.375rem; /* rounded-md */
+      cursor: pointer;
+      transition: all 0.15s ease;
+      font-size: 0.875rem;
+    }
+    .custom-select-option:hover {
+      background-color: var(--color-background);
+    }
+    .custom-select-option.selected {
+      background-color: var(--color-accent);
+      color: white;
+      font-weight: 600;
+    }
+
+  </style>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.1.1",
+    "react-dom/": "https://esm.sh/react-dom@^19.1.1/",
+    "react/": "https://esm.sh/react@^19.1.1/",
+    "xlsx": "https://esm.sh/xlsx@^0.18.5",
+    "@google/genai": "https://esm.sh/@google/genai@^1.12.0",
+    "vite": "https://esm.sh/vite@^7.0.6",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^4.7.0"
+  }
+}
+</script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
