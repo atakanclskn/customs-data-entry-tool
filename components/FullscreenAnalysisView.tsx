@@ -5,7 +5,7 @@ import {
     XIcon, PanelLeftIcon, SearchIcon, ArrowUpIcon, ArrowDownIcon, ChevronLeftIcon,
     ChevronRightIcon, SaveIcon, UndoIcon, RedoIcon, ErrorIcon, CheckCircleIcon,
     ZoomInIcon, ZoomOutIcon, BadgeCheckIcon, DownloadIcon, FileIcon,
-    RotateCcwIcon, RotateCwIcon, XCircleIcon
+    RotateCcwIcon, RotateCwIcon, XCircleIcon, TrashIcon
 } from './Icons';
 import * as XLSX from 'xlsx';
 import { FIELD_LABELS, FREIGHT_FIELDS, EXCEL_EXPORT_ORDER } from '../constants';
@@ -238,6 +238,7 @@ interface FullscreenAnalysisViewProps {
     onNavigateItem: (id: string) => void;
     context: 'analysis' | 'history';
     onRejectPairing: (entryId: string) => Promise<void>;
+    onDeleteAndRePair: (entryId: string, docToKeep: DocumentInfo) => Promise<void>;
 }
 
 type SortKey = 'analyzedAt' | 'fileName' | 'verified';
@@ -254,7 +255,7 @@ const extractedFieldsOrder = [
   'TAREKS-TARIM-TSE',
 ];
 
-const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, selectedId, onClose, onUpdateEntry, onNavigateItem, context, onRejectPairing }) => {
+const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, selectedId, onClose, onUpdateEntry, onNavigateItem, context, onRejectPairing, onDeleteAndRePair }) => {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [sortConfig, setSortConfig] = useState<{key: SortKey, direction: 'asc' | 'desc'}>({ key: 'fileName', direction: 'asc' });
@@ -263,6 +264,7 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
     const [verificationState, setVerificationState] = useState<'idle' | 'confirmed' | 'removed'>('idle');
     const [saveState, setSaveState] = useState<'idle' | 'saved'>('idle');
     const [showVerifiedOnly, setShowVerifiedOnly] = useState(false);
+    const [docToDelete, setDocToDelete] = useState<{ entryId: string, docToKeep: DocumentInfo } | null>(null);
 
     const currentItem = useMemo(() => items.find(i => i.id === selectedId), [items, selectedId]);
     
@@ -484,7 +486,7 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            if (navigationIntent) return;
+            if (navigationIntent || docToDelete) return; // Also block shortcuts if delete confirmation is open
 
             const isInputFocused = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
 
@@ -537,7 +539,7 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [handleNavigateByIndex, navigationIntent, isVerifyingPairing, handleSave, undo, redo, handleNavigation, handleFieldNavigation]);
+    }, [handleNavigateByIndex, navigationIntent, isVerifyingPairing, handleSave, undo, redo, handleNavigation, handleFieldNavigation, docToDelete]);
 
     const handleConfirmPairing = async () => {
         if (!currentItem) return;
@@ -574,6 +576,23 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
             const updatedEntry = { ...currentItem, [docKey]: updatedDoc };
             onUpdateEntry(updatedEntry);
         }
+    };
+
+    const handleConfirmDeleteAndRePair = () => {
+        if (docToDelete) {
+            onDeleteAndRePair(docToDelete.entryId, docToDelete.docToKeep);
+            setDocToDelete(null);
+        }
+    };
+    
+    const handleDeleteClick = (docType: 'declaration' | 'freight') => {
+        if (!currentItem) return;
+        const docToKeep = docType === 'declaration' ? currentItem.freight : currentItem.declaration;
+        const docToRemove = docType === 'declaration' ? currentItem.declaration : currentItem.freight;
+        
+        if (!docToKeep || !docToRemove) return;
+
+        setDocToDelete({ entryId: currentItem.id, docToKeep });
     };
 
     // --- Universal Pan/Zoom Handlers ---
@@ -796,7 +815,7 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
                          ) : (
                             <div className="flex-1 overflow-y-auto min-h-0 pr-2">
                                 <div>
-                                    <h4 className="text-sm font-semibold text-text-primary border-b border-border pb-1 mb-1">Beyanname Bilgileri</h4>
+                                    <h4 className="text-base font-bold text-center text-text-primary border-b border-border pb-2 mb-2">Beyanname Bilgileri</h4>
                                     <div className="space-y-0">
                                         {extractedFieldsOrder.filter(k => k !== 'TAREKS-TARIM-TSE').map((key, index) => {
                                              if (key === 'SON AMBAR') {
@@ -868,7 +887,7 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
                                             </div>
                                         </div>
                                     </div>
-                                    <h4 className="text-sm font-semibold text-text-primary border-b border-border pb-1 pt-2 mb-1">Navlun Faturası Bilgileri</h4>
+                                    <h4 className="text-base font-bold text-center text-text-primary border-b border-border pb-2 mt-4 mb-2">Navlun Faturası Bilgileri</h4>
                                     <div className="space-y-0">
                                         {FREIGHT_FIELDS.map((key, index) => ( <EditableField key={key} label={key} value={editedData[key] || ''} onChange={(newValue) => setEditedData({ ...editedData, [key]: newValue })} onActivate={setActiveFieldLabel} isActive={activeFieldLabel === key} setRef={(el) => { fieldRefs.current[key] = el; }} isEven={index % 2 === 0} /> ))}
                                     </div>
@@ -890,6 +909,14 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
                                 <button onClick={() => handleZoom('declaration', 'out')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Uzaklaş"><ZoomOutIcon className="w-5 h-5"/></button>
                                 <button onClick={() => handleZoom('declaration', 'reset')} className="px-2 py-1.5 rounded-md hover:bg-border text-xs font-bold" title="Sıfırla">1:1</button>
                                 <button onClick={() => handleZoom('declaration', 'in')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Yakınlaş"><ZoomInIcon className="w-5 h-5"/></button>
+                                <button
+                                    onClick={() => handleDeleteClick('declaration')}
+                                    disabled={!currentItem.declaration || !currentItem.freight}
+                                    className="p-1.5 rounded-md text-text-muted hover:bg-danger/20 hover:text-danger disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-text-muted transition-colors"
+                                    title="Bu belgeyi sil ve kaydır"
+                                >
+                                    <TrashIcon className="w-5 h-5"/>
+                                </button>
                             </div>
                         </div>
                         <div ref={declarationViewerRef} className="flex-1 bg-border/20 rounded-lg overflow-hidden relative" onWheel={(e) => handleWheelZoom(e, 'declaration')}>
@@ -917,6 +944,14 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
                                 <button onClick={() => handleZoom('freight', 'out')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Uzaklaş"><ZoomOutIcon className="w-5 h-5"/></button>
                                 <button onClick={() => handleZoom('freight', 'reset')} className="px-2 py-1.5 rounded-md hover:bg-border text-xs font-bold" title="Sıfırla">1:1</button>
                                 <button onClick={() => handleZoom('freight', 'in')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Yakınlaş"><ZoomInIcon className="w-5 h-5"/></button>
+                                <button
+                                    onClick={() => handleDeleteClick('freight')}
+                                    disabled={!currentItem.declaration || !currentItem.freight}
+                                    className="p-1.5 rounded-md text-text-muted hover:bg-danger/20 hover:text-danger disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-text-muted transition-colors"
+                                    title="Bu belgeyi sil ve kaydır"
+                                >
+                                    <TrashIcon className="w-5 h-5"/>
+                                </button>
                             </div>
                         </div>
                         <div ref={freightViewerRef} className="flex-1 bg-border/20 rounded-lg overflow-hidden relative" onWheel={(e) => handleWheelZoom(e, 'freight')}>
@@ -945,6 +980,19 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
                         <div className="flex flex-col sm:flex-row justify-center gap-4">
                             <button onClick={() => confirmNavigation(false)} className="btn btn-secondary w-full">Değişiklikleri Yoksay</button>
                             <button onClick={() => confirmNavigation(true)} className="btn btn-primary w-full">Kaydet ve Devam Et</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {docToDelete && (
+                <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[60] animate-fade-in p-4" onClick={() => setDocToDelete(null)}>
+                    <div className="modern-card rounded-2xl p-8 max-w-md w-full text-center" onMouseDown={e => e.stopPropagation()}>
+                        <ErrorIcon className="w-16 h-16 mx-auto text-[var(--color-danger)] mb-4" />
+                        <h2 className="text-2xl font-bold text-text-primary mb-2">Belgeyi Sil ve Kaydır</h2>
+                        <p className="text-text-secondary mb-8">Bu belgeyi kalıcı olarak silmek üzeresiniz. Sonraki tüm belgeler sola kaydırılacak ve yeniden eşleştirilecektir. Bu işlem geri alınamaz. Emin misiniz?</p>
+                        <div className="flex justify-center gap-4">
+                            <button onClick={() => setDocToDelete(null)} className="btn btn-secondary w-full">İptal</button>
+                            <button onClick={handleConfirmDeleteAndRePair} className="btn btn-danger w-full">Evet, Sil ve Kaydır</button>
                         </div>
                     </div>
                 </div>

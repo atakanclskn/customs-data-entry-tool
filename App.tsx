@@ -221,6 +221,83 @@ const handleRejectPairing = useCallback(async (entryId: string) => {
     }
   }, [handleOpenFullscreen]);
 
+  const handleDeleteAndRePair = useCallback(async (entryId: string, docToKeep: DocumentInfo) => {
+    // 1. Sort the history to reflect the sequential order of pairs based on filename.
+    const sortedHistory = [...history].sort((a, b) => {
+        const nameA = a.declaration?.fileName || a.freight?.fileName || '';
+        const nameB = b.declaration?.fileName || b.freight?.fileName || '';
+        return nameA.localeCompare(nameB);
+    });
+
+    const currentIndex = sortedHistory.findIndex(e => e.id === entryId);
+    if (currentIndex === -1) {
+        console.error("Could not find the entry to modify for re-pairing.");
+        return;
+    }
+
+    // 2. Get all entries from this point forward.
+    const entriesToProcess = sortedHistory.slice(currentIndex);
+    const idsToDelete = entriesToProcess.map(e => e.id);
+
+    // 3. Create a flat list of all documents from these entries.
+    const allDocsFromEntries = entriesToProcess.flatMap(e => {
+        const pair: DocumentInfo[] = [];
+        if (e.declaration) pair.push(e.declaration);
+        if (e.freight) pair.push(e.freight);
+        return pair;
+    });
+
+    // 4. Find the document to be deleted and filter it out.
+    const currentEntry = sortedHistory[currentIndex];
+    const docToDelete = currentEntry.declaration?.id === docToKeep.id ? currentEntry.freight : currentEntry.declaration;
+    const newDocumentList = allDocsFromEntries.filter(doc => doc.id !== docToDelete?.id);
+
+    // 5. Delete the old history entries.
+    await historyService.deleteMultipleHistoryEntries(idsToDelete);
+
+    // 6. Create new pairs from the updated document list.
+    const newEntriesData: { declaration?: DocumentInfo; freight?: DocumentInfo; }[] = [];
+    for (let i = 0; i < newDocumentList.length; i += 2) {
+        const entry: { declaration?: DocumentInfo; freight?: DocumentInfo; } = {};
+        entry.declaration = newDocumentList[i];
+        if (i + 1 < newDocumentList.length) {
+            entry.freight = newDocumentList[i + 1];
+        }
+        newEntriesData.push(entry);
+    }
+    
+    let firstNewEntryId: string | null = null;
+    if (newEntriesData.length > 0) {
+        const newEntries = await Promise.all(newEntriesData.map(data => historyService.addHistoryEntry(data)));
+        // Find the ID of the new entry that corresponds to the one the user was viewing.
+        // It should be the first one after sorting.
+        if (newEntries.length > 0) {
+            newEntries.sort((a,b) => {
+                const nameA = a.declaration?.fileName || a.freight?.fileName || '';
+                const nameB = b.declaration?.fileName || b.freight?.fileName || '';
+                return nameA.localeCompare(nameB);
+            });
+            firstNewEntryId = newEntries[0].id;
+        }
+
+        // Update state: filter out old, add new.
+        setHistory(prev => {
+            const remaining = prev.filter(e => !idsToDelete.includes(e.id));
+            return [...newEntries, ...remaining].sort((a, b) => new Date(b.analyzedAt).getTime() - new Date(a.analyzedAt).getTime());
+        });
+    } else {
+        // Handle case where deleting the doc leaves no more docs to pair.
+        setHistory(prev => prev.filter(e => !idsToDelete.includes(e.id)));
+    }
+
+    // 7. Navigate to the new pair or close if none are left.
+    if (firstNewEntryId) {
+        handleFullscreenNavigate(firstNewEntryId);
+    } else {
+        handleCloseFullscreen();
+    }
+  }, [history, handleFullscreenNavigate, handleCloseFullscreen]);
+
 
   const navigateAndCloseSidebar = (targetPage: Page) => {
     if (page !== targetPage) {
@@ -308,6 +385,7 @@ const handleRejectPairing = useCallback(async (entryId: string) => {
             onNavigateItem={handleFullscreenNavigate}
             context={fullscreenViewData.context}
             onRejectPairing={handleRejectPairing}
+            onDeleteAndRePair={handleDeleteAndRePair}
         />
       )}
     </div>

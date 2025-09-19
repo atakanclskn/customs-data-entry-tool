@@ -1,6 +1,6 @@
 {
-  "name": "19.09.2025 VERİ GİRİŞ ARACI",
-  "description": "",
+  "name": "FINAL VERI GIRIS ARACI",
+  "description": "A web-based application to streamline data entry for customs declarations and freight invoices. Features document pairing, a fullscreen editor for manual data input, and offline-first support using IndexedDB. Built with React & TailwindCSS.",
   "requestFramePermissions": [],
   "prompt": ""
 }
