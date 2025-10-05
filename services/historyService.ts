@@ -55,7 +55,7 @@ export const getHistory = async (): Promise<HistoryEntry[]> => {
 
 export const addHistoryEntry = async (
     entryData: { declaration?: DocumentInfo; freight?: DocumentInfo; },
-    options?: { pairingVerified?: boolean }
+    options?: { pairingVerified?: boolean | null }
 ): Promise<HistoryEntry> => {
     
     // Create an empty data object with all possible keys initialized to empty strings.
@@ -68,13 +68,20 @@ export const addHistoryEntry = async (
     // Set default value for Özet Beyan No
     emptyData['ÖZET BEYAN NO'] = 'IM';
 
+    // Set KAYIT TARİHİ to today's date automatically
+    const today = new Date();
+    const formattedDate = `${String(today.getDate()).padStart(2, '0')}.${String(today.getMonth() + 1).padStart(2, '0')}.${today.getFullYear()}`;
+    emptyData['KAYIT TARİHİ'] = formattedDate;
+
 
     const newEntry: HistoryEntry = {
         id: `hist_${new Date().getTime()}_${Math.random()}`,
         analyzedAt: new Date().toISOString(),
         status: 'SUCCESS',
         data: emptyData,
-        pairingVerified: options?.pairingVerified ?? false, // Use option or default to false
+        // If option is null, it's a single doc for pairing, so status is undefined.
+        // Otherwise, default to false (unverified pair).
+        pairingVerified: options?.pairingVerified === null ? undefined : (options?.pairingVerified ?? false),
         declaration: entryData.declaration,
         freight: entryData.freight,
     };

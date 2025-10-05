@@ -5,7 +5,7 @@ import {
     XIcon, PanelLeftIcon, SearchIcon, ArrowUpIcon, ArrowDownIcon, ChevronLeftIcon,
     ChevronRightIcon, SaveIcon, UndoIcon, RedoIcon, ErrorIcon, CheckCircleIcon,
     ZoomInIcon, ZoomOutIcon, BadgeCheckIcon, DownloadIcon, FileIcon,
-    RotateCcwIcon, RotateCwIcon, XCircleIcon, TrashIcon
+    RotateCcwIcon, RotateCwIcon, XCircleIcon, TrashIcon, GripVerticalIcon
 } from './Icons';
 import * as XLSX from 'xlsx';
 import { FIELD_LABELS, FREIGHT_FIELDS, EXCEL_EXPORT_ORDER } from '../constants';
@@ -22,49 +22,68 @@ const dateFields = new Set([
 const sonAmbarOptions = ["HÜRSAN", "MARDAŞ", "KUMPORT", "MARPORT"];
 
 // --- Custom Hook for Undo/Redo State ---
-const useUndoableState = <T,>(initialState: T): [T, (newState: T, overwrite?: boolean) => void, () => void, () => void, boolean, boolean] => {
-    const [history, setHistory] = useState<T[]>([initialState]);
-    const [currentIndex, setCurrentIndex] = useState(0);
+const useUndoableState = <T,>(initialState: T): [T, (action: React.SetStateAction<T>, overwrite?: boolean) => void, () => void, () => void, boolean, boolean] => {
+    const [state, setStateInternal] = useState({
+        history: [initialState],
+        currentIndex: 0,
+    });
 
-    const state = history[currentIndex];
+    // Use a ref to hold the latest state to avoid stale closures in the `setState` callback.
+    const stateRef = useRef(state);
+    stateRef.current = state;
 
-    const setState = useCallback((newState: T, overwrite = false) => {
-        if (!overwrite && JSON.stringify(newState) === JSON.stringify(state)) {
+    const setState = useCallback((action: React.SetStateAction<T>, overwrite = false) => {
+        const currentStateValue = stateRef.current.history[stateRef.current.currentIndex];
+        const newState = typeof action === 'function'
+            ? (action as (prevState: T) => T)(currentStateValue)
+            : action;
+
+        if (!overwrite && JSON.stringify(newState) === JSON.stringify(currentStateValue)) {
             return;
         }
-        
-        const newHistory = history.slice(0, currentIndex + 1);
-        if (!overwrite) {
-          newHistory.push(newState);
-        } else {
-            setHistory([newState]);
-            setCurrentIndex(0);
-            return;
-        }
-        
-        setHistory(newHistory);
-        setCurrentIndex(newHistory.length - 1);
-    }, [currentIndex, history, state]);
+
+        setStateInternal(prevState => {
+            const newHistory = prevState.history.slice(0, prevState.currentIndex + 1);
+            if (overwrite) {
+                return {
+                    history: [newState],
+                    currentIndex: 0
+                };
+            } else {
+                newHistory.push(newState);
+                return {
+                    history: newHistory,
+                    currentIndex: newHistory.length - 1,
+                };
+            }
+        });
+    }, []); // Note: Empty dependency array makes this function stable.
 
     const undo = useCallback(() => {
-        if (currentIndex > 0) {
-            setCurrentIndex(prevIndex => prevIndex - 1);
-        }
-    }, [currentIndex]);
+        setStateInternal(prevState => {
+            if (prevState.currentIndex > 0) {
+                return { ...prevState, currentIndex: prevState.currentIndex - 1 };
+            }
+            return prevState;
+        });
+    }, []);
 
     const redo = useCallback(() => {
-        // Bug fix: The redo logic was incorrect. It should increment the index, not decrement it.
-        if (currentIndex < history.length - 1) {
-            // FIX: Changed prevIndex - 1 to prevIndex + 1 to correctly move forward in history.
-            setCurrentIndex(prevIndex => prevIndex + 1);
-        }
-    }, [currentIndex, history.length]);
+         setStateInternal(prevState => {
+            if (prevState.currentIndex < prevState.history.length - 1) {
+                return { ...prevState, currentIndex: prevState.currentIndex + 1 };
+            }
+            return prevState;
+        });
+    }, []);
+    
+    const currentState = state.history[state.currentIndex];
+    const canUndo = state.currentIndex > 0;
+    const canRedo = state.currentIndex < state.history.length - 1;
 
-    const canUndo = currentIndex > 0;
-    const canRedo = currentIndex < history.length - 1;
-
-    return [state, setState, undo, redo, canUndo, canRedo];
+    return [currentState, setState, undo, redo, canUndo, canRedo];
 };
+
 
 // --- SonAmbarField Component ---
 interface SonAmbarFieldProps {
@@ -110,8 +129,8 @@ const SonAmbarField: React.FC<SonAmbarFieldProps> = ({ value, onChange, label, o
             className={`flex items-baseline gap-x-2 border-l-2 py-1 px-2 transition-colors rounded-md ${isActive ? 'bg-accent/10 border-accent' : 'border-transparent'} ${isEven ? 'bg-[var(--color-background)]' : 'bg-transparent'}`}
             onMouseDown={() => onActivate(label)}
         >
-            <p className="text-2xs text-text-muted font-medium whitespace-nowrap w-1/3 truncate" title={FIELD_LABELS[label]}>{FIELD_LABELS[label]}</p>
-            <div className="flex-grow w-2/3 flex flex-col gap-1">
+            <p className="text-2xs text-text-muted font-medium whitespace-nowrap w-1/4 truncate" title={FIELD_LABELS[label]}>{FIELD_LABELS[label]}</p>
+            <div className="flex-grow w-3/4 flex flex-col gap-1">
                 <select
                     value={isOtherActive ? 'Diğer' : value}
                     onChange={handleSelectChange}
@@ -146,22 +165,22 @@ interface EditableFieldProps {
     isActive: boolean;
     setRef: (element: HTMLDivElement | null) => void;
     isEven: boolean;
+    readOnly?: boolean;
+    datalistId?: string;
+    datalistOptions?: string[];
 }
-const EditableField: React.FC<EditableFieldProps> = ({ label, value, onChange, onActivate, isActive, setRef, isEven }) => {
+const EditableField: React.FC<EditableFieldProps> = ({ label, value, onChange, onActivate, isActive, setRef, isEven, readOnly = false, datalistId, datalistOptions = [] }) => {
     const [isEditing, setIsEditing] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
     const displayLabel = FIELD_LABELS[label] || label;
     const isDateField = dateFields.has(label);
 
-    // This useEffect replaces the need for local state.
-    // When the field becomes active (either by click or keyboard nav), we set editing to true.
     useEffect(() => {
-        if (isActive) {
+        if (isActive && !readOnly) {
             setIsEditing(true);
         }
-    }, [isActive]);
+    }, [isActive, readOnly]);
 
-    // When we enter editing mode, focus the input.
     useEffect(() => {
         if (isEditing) {
             inputRef.current?.focus();
@@ -170,17 +189,16 @@ const EditableField: React.FC<EditableFieldProps> = ({ label, value, onChange, o
     }, [isEditing]);
     
     const handleActivate = () => {
+        if (readOnly) return;
         setIsEditing(true);
         onActivate(label);
     };
 
     const handleBlur = () => {
         setIsEditing(false);
-        // No need to call onChange here anymore, it's done on every keystroke.
     };
     
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-        // On Enter or Escape, simply leave editing mode.
         if (e.key === 'Enter' || e.key === 'Escape') {
             setIsEditing(false);
             inputRef.current?.blur();
@@ -189,7 +207,9 @@ const EditableField: React.FC<EditableFieldProps> = ({ label, value, onChange, o
     
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         let newValue = e.target.value;
-        if (isDateField) {
+        if (label === 'ALICI VKN') {
+            newValue = newValue.replace(/\D/g, '');
+        } else if (isDateField) {
             const digits = newValue.replace(/\D/g, '').slice(0, 8);
             if (digits.length > 4) {
                 newValue = `${digits.slice(0, 2)}.${digits.slice(2, 4)}.${digits.slice(4)}`;
@@ -201,23 +221,41 @@ const EditableField: React.FC<EditableFieldProps> = ({ label, value, onChange, o
         }
         onChange(newValue);
     };
-
+    
+    if (readOnly) {
+        return (
+            <div ref={setRef} className={`flex items-baseline gap-x-2 border-l-2 py-1 px-2 rounded-md border-transparent ${isEven ? 'bg-[var(--color-background)]' : 'bg-transparent'}`}>
+                <p className="text-2xs text-text-muted font-medium whitespace-nowrap w-1/4 truncate" title={displayLabel}>{displayLabel}</p>
+                <div className="flex-grow w-3/4">
+                    <p className="text-2xs font-medium text-text-primary break-words p-0">{value || <span className="italic text-text-muted">N/A</span>}</p>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div ref={setRef} className={`flex items-baseline gap-x-2 border-l-2 py-1 px-2 transition-colors rounded-md ${isActive ? 'bg-accent/10 border-accent' : 'border-transparent'} ${isEven ? 'bg-[var(--color-background)]' : 'bg-transparent'}`} onDoubleClick={handleActivate}>
-            <p className="text-2xs text-text-muted font-medium whitespace-nowrap w-1/3 truncate" title={displayLabel}>{displayLabel}</p>
-            <div className="flex-grow w-2/3">
+            <p className="text-2xs text-text-muted font-medium whitespace-nowrap w-1/4 truncate" title={displayLabel}>{displayLabel}</p>
+            <div className="flex-grow w-3/4">
                 {isEditing ? (
+                    <>
                     <input
                         ref={inputRef}
-                        type={isDateField ? 'tel' : 'text'}
-                        inputMode={isDateField ? 'numeric' : 'text'}
+                        type={isDateField || label === 'ALICI VKN' ? 'tel' : 'text'}
+                        inputMode={isDateField || label === 'ALICI VKN' ? 'numeric' : 'text'}
                         value={value}
                         onChange={handleInputChange}
                         onBlur={handleBlur}
                         onKeyDown={handleKeyDown}
                         className="w-full bg-transparent border-b border-accent text-2xs font-medium p-0 focus:outline-none"
+                        list={datalistId}
                     />
+                    {datalistId && datalistOptions.length > 0 && (
+                        <datalist id={datalistId}>
+                            {datalistOptions.map(opt => <option key={opt} value={opt} />)}
+                        </datalist>
+                    )}
+                    </>
                 ) : (
                     <p className="text-2xs font-medium text-text-primary break-words cursor-pointer hover:bg-accent/10 p-0 rounded-sm" onClick={handleActivate}>
                         {value || <span className="italic text-[var(--color-danger)] font-semibold">Boş</span>}
@@ -232,20 +270,21 @@ const EditableField: React.FC<EditableFieldProps> = ({ label, value, onChange, o
 // --- Main Fullscreen View Component ---
 interface FullscreenAnalysisViewProps {
     items: HistoryEntry[];
+    history: HistoryEntry[];
     selectedId: string;
     onClose: () => void;
     onUpdateEntry: (entry: HistoryEntry) => Promise<void>;
     onNavigateItem: (id: string) => void;
     context: 'analysis' | 'history';
     onRejectPairing: (entryId: string) => Promise<void>;
-    onDeleteAndRePair: (entryId: string, docToKeep: DocumentInfo) => Promise<void>;
+    onDeleteFromPair: (entryId: string, docTypeToDelete: 'declaration' | 'freight') => Promise<void>;
 }
 
 type SortKey = 'analyzedAt' | 'fileName' | 'verified';
 
 const extractedFieldsOrder = [
-  'Alıcı',
   'ALICI VKN',
+  'Alıcı',
   'BEYANNAME TESCİL TARİHİ',
   'Teslim şekli',
   'KONTEYNER NO',
@@ -255,7 +294,7 @@ const extractedFieldsOrder = [
   'TAREKS-TARIM-TSE',
 ];
 
-const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, selectedId, onClose, onUpdateEntry, onNavigateItem, context, onRejectPairing, onDeleteAndRePair }) => {
+const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, history, selectedId, onClose, onUpdateEntry, onNavigateItem, context, onRejectPairing, onDeleteFromPair }) => {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [sortConfig, setSortConfig] = useState<{key: SortKey, direction: 'asc' | 'desc'}>({ key: 'fileName', direction: 'asc' });
@@ -264,12 +303,50 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
     const [verificationState, setVerificationState] = useState<'idle' | 'confirmed' | 'removed'>('idle');
     const [saveState, setSaveState] = useState<'idle' | 'saved'>('idle');
     const [showVerifiedOnly, setShowVerifiedOnly] = useState(false);
-    const [docToDelete, setDocToDelete] = useState<{ entryId: string, docToKeep: DocumentInfo } | null>(null);
+    const [docTypeToDelete, setDocTypeToDelete] = useState<'declaration' | 'freight' | null>(null);
+    
+    // Resizable panel state
+    const dataPanelRef = useRef<HTMLDivElement>(null);
+    const [sidebarWidth, setSidebarWidth] = useState(320); // Default width in pixels (20rem)
+    const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+
+    useEffect(() => {
+        const checkMobile = () => setIsMobile(window.innerWidth < 768);
+        window.addEventListener('resize', checkMobile);
+        return () => window.removeEventListener('resize', checkMobile);
+    }, []);
+
+    const handleMouseDown = useCallback((e: React.MouseEvent) => {
+        e.preventDefault();
+        const startX = e.clientX;
+        const startWidth = dataPanelRef.current?.offsetWidth || sidebarWidth;
+
+        const handleMouseMove = (moveEvent: MouseEvent) => {
+            const dx = moveEvent.clientX - startX;
+            const newWidth = startWidth + dx;
+            const minWidth = 288; // 18rem
+            const containerWidth = dataPanelRef.current?.parentElement?.offsetWidth || window.innerWidth;
+            const maxWidth = Math.min(800, containerWidth - 400); // Ensure viewers have at least 400px
+            const constrainedWidth = Math.max(minWidth, Math.min(newWidth, maxWidth));
+            setSidebarWidth(constrainedWidth);
+        };
+
+        const handleMouseUp = () => {
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+        };
+
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+    }, [sidebarWidth]);
+
 
     const currentItem = useMemo(() => items.find(i => i.id === selectedId), [items, selectedId]);
     
     const [editedData, setEditedData, undo, redo, canUndo, canRedo] = useUndoableState<DeclarationData>(currentItem?.data || {});
-    
+    const [localVerified, setLocalVerified] = useState<boolean | undefined>(undefined);
+    const [localRotations, setLocalRotations] = useState<{ declaration?: number; freight?: number }>({});
+
     const [isDirty, setIsDirty] = useState(false);
     const [navigationIntent, setNavigationIntent] = useState<{ type: 'item' | 'close', id?: string } | null>(null);
 
@@ -374,16 +451,24 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
                 setIsVerifyingPairing(false);
             }
              setEditedData(currentItem.data || {}, true);
+             setLocalVerified(currentItem.verified);
+             setLocalRotations({
+                declaration: currentItem.declaration?.rotation,
+                freight: currentItem.freight?.rotation,
+             });
              setActiveFieldLabel(null);
         }
-    }, [currentItem, items, onNavigateItem, onClose]);
+    }, [currentItem, items, onNavigateItem, onClose, setEditedData]);
 
     useEffect(() => {
-        if (!currentItem?.data) return;
-        const original = JSON.stringify(currentItem.data);
-        const edited = JSON.stringify(editedData);
-        setIsDirty(original !== edited);
-    }, [editedData, currentItem]);
+        if (!currentItem) return;
+        const dataDirty = JSON.stringify(currentItem.data || {}) !== JSON.stringify(editedData);
+        const rotationDirty = (currentItem.declaration?.rotation || 0) !== (localRotations.declaration || 0) || 
+                              (currentItem.freight?.rotation || 0) !== (localRotations.freight || 0);
+        const verifiedDirty = currentItem.verified !== localVerified;
+        
+        setIsDirty(dataDirty || rotationDirty || verifiedDirty);
+    }, [editedData, localRotations, localVerified, currentItem]);
 
     const filteredAndSortedItems = useMemo(() => {
         return items
@@ -444,7 +529,13 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
 
     const handleSave = async () => {
         if (!currentItem || !isDirty) return;
-        const updatedEntry = { ...currentItem, data: editedData, verified: true };
+        const updatedEntry = { 
+            ...currentItem, 
+            data: editedData,
+            verified: localVerified,
+            declaration: currentItem.declaration ? { ...currentItem.declaration, rotation: localRotations.declaration || 0 } : undefined,
+            freight: currentItem.freight ? { ...currentItem.freight, rotation: localRotations.freight || 0 } : undefined,
+        };
         await onUpdateEntry(updatedEntry);
         setSaveState('saved');
     };
@@ -486,7 +577,7 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            if (navigationIntent || docToDelete) return; // Also block shortcuts if delete confirmation is open
+            if (navigationIntent || docTypeToDelete) return; // Also block shortcuts if delete confirmation is open
 
             const isInputFocused = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
 
@@ -539,7 +630,7 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [handleNavigateByIndex, navigationIntent, isVerifyingPairing, handleSave, undo, redo, handleNavigation, handleFieldNavigation, docToDelete]);
+    }, [handleNavigateByIndex, navigationIntent, isVerifyingPairing, handleSave, undo, redo, handleNavigation, handleFieldNavigation, docTypeToDelete]);
 
     const handleConfirmPairing = async () => {
         if (!currentItem) return;
@@ -549,51 +640,117 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
 
     const handleVerificationToggle = () => {
         if (!currentItem) return;
-        const isCurrentlyVerified = currentItem.verified;
+        const isCurrentlyVerified = localVerified;
         setVerificationState(isCurrentlyVerified ? 'removed' : 'confirmed');
-        onUpdateEntry({ ...currentItem, verified: !isCurrentlyVerified });
+        setLocalVerified(!isCurrentlyVerified);
     };
 
     const handleRotate = (viewer: 'declaration' | 'freight', direction: 'left' | 'right') => {
-        if (!currentItem) return;
         const angle = direction === 'left' ? -90 : 90;
         
-        let docToUpdate: DocumentInfo | undefined;
-        let docKey: 'declaration' | 'freight' | undefined;
-
-        if (viewer === 'declaration') {
-            docToUpdate = currentItem.declaration;
-            docKey = 'declaration';
-        } else {
-            docToUpdate = currentItem.freight;
-            docKey = 'freight';
-        }
-
-        if (docToUpdate && docKey) {
-            const currentRotation = docToUpdate.rotation || 0;
+        setLocalRotations(prev => {
+            const currentRotation = (viewer === 'declaration' ? prev.declaration : prev.freight) || 0;
             const newRotation = (currentRotation + angle + 360) % 360;
-            const updatedDoc = { ...docToUpdate, rotation: newRotation };
-            const updatedEntry = { ...currentItem, [docKey]: updatedDoc };
-            onUpdateEntry(updatedEntry);
-        }
+            return {
+                ...prev,
+                [viewer]: newRotation,
+            };
+        });
     };
 
-    const handleConfirmDeleteAndRePair = () => {
-        if (docToDelete) {
-            onDeleteAndRePair(docToDelete.entryId, docToDelete.docToKeep);
-            setDocToDelete(null);
+    const handleConfirmDelete = () => {
+        if (docTypeToDelete && currentItem) {
+            onDeleteFromPair(currentItem.id, docTypeToDelete);
+            setDocTypeToDelete(null);
         }
     };
     
     const handleDeleteClick = (docType: 'declaration' | 'freight') => {
-        if (!currentItem) return;
-        const docToKeep = docType === 'declaration' ? currentItem.freight : currentItem.declaration;
-        const docToRemove = docType === 'declaration' ? currentItem.declaration : currentItem.freight;
-        
-        if (!docToKeep || !docToRemove) return;
-
-        setDocToDelete({ entryId: currentItem.id, docToKeep });
+        if (!currentItem || !currentItem.declaration || !currentItem.freight) return;
+        setDocTypeToDelete(docType);
     };
+
+    // --- Autocomplete and Auto-calculation ---
+
+    // VKN -> Alıcı
+    useEffect(() => {
+        const vkn = editedData['ALICI VKN'];
+        if (vkn && vkn.length > 5) {
+            const latestMatch = [...history].reverse().find(item => 
+                item.data?.['ALICI VKN'] === vkn && item.data?.['Alıcı']
+            );
+            if (latestMatch?.data?.['Alıcı']) {
+                setEditedData(prev => {
+                    if (prev['Alıcı'] !== latestMatch.data!['Alıcı']!) {
+                        return { ...prev, 'Alıcı': latestMatch.data!['Alıcı']! };
+                    }
+                    return prev;
+                });
+            }
+        }
+    }, [editedData['ALICI VKN'], history, setEditedData]);
+    
+    // Nakliyeci options for datalist
+    const nakliyeciOptions = useMemo(() => {
+        const names = new Set<string>();
+        history.forEach(item => {
+            if (item.data?.['Nakliyeci']) {
+                names.add(item.data['Nakliyeci']);
+            }
+        });
+        return Array.from(names);
+    }, [history]);
+    
+    // Calculate TT (Transit Time)
+    useEffect(() => {
+        const parseDate = (dateStr?: string): Date | null => {
+            if (!dateStr) return null;
+            const parts = dateStr.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+            if (!parts) return null;
+            return new Date(parseInt(parts[3]), parseInt(parts[2]) - 1, parseInt(parts[1]));
+        };
+
+        const cikis = parseDate(editedData['Tahmini Çıkış Tarihi']);
+        const varis = parseDate(editedData['Varış Tarihi']);
+
+        let transitTime = '';
+        if (cikis && varis && varis >= cikis) {
+            const diffTime = varis.getTime() - cikis.getTime();
+            const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+            transitTime = `${diffDays} gün`;
+        }
+
+        setEditedData(prev => {
+            if (prev['TT'] !== transitTime) {
+                return { ...prev, 'TT': transitTime };
+            }
+            return prev;
+        });
+    }, [editedData['Tahmini Çıkış Tarihi'], editedData['Varış Tarihi'], setEditedData]);
+    
+    // Calculate w/m navlun
+    useEffect(() => {
+        const rakipNavlunStr = editedData['Rakip Navlun w/m'] || '0';
+        const hacimStr = editedData['Hacim'] || '0';
+        
+        // Handle both comma and dot as decimal separators
+        const rakipNavlun = parseFloat(rakipNavlunStr.replace(/\./g, '').replace(',', '.'));
+        const hacim = parseFloat(hacimStr.replace(/\./g, '').replace(',', '.'));
+
+        let wmLiman = '';
+        if (!isNaN(rakipNavlun) && !isNaN(hacim) && hacim > 0) {
+            // Format back to comma for display
+            wmLiman = (rakipNavlun / hacim).toFixed(2).replace('.', ',');
+        }
+        
+        setEditedData(prev => {
+            if (prev['w/m navlun'] !== wmLiman) {
+                return { ...prev, 'w/m navlun': wmLiman };
+            }
+            return prev;
+        });
+    }, [editedData['Rakip Navlun w/m'], editedData['Hacim'], setEditedData]);
+
 
     // --- Universal Pan/Zoom Handlers ---
     const handlePanStart = (e: React.MouseEvent, viewer: 'declaration' | 'freight') => { e.preventDefault(); const transform = viewer === 'declaration' ? declarationTransform : freightTransform; setPanningState({ viewer, startX: e.clientX - transform.x, startY: e.clientY - transform.y }); };
@@ -681,8 +838,8 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
                 animationClass = 'animate-pop-in-out';
                 break;
             default:
-                text = currentItem.verified ? 'Onayı Kaldır' : 'Onayla';
-                key = currentItem.verified ? 'verified' : 'unverified';
+                text = localVerified ? 'Onayı Kaldır' : 'Onayla';
+                key = localVerified ? 'verified' : 'unverified';
                 break;
         }
         return <span key={key} className={`${animationClass} whitespace-nowrap`}>{text}</span>;
@@ -695,8 +852,11 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
         return <span key="save" className="whitespace-nowrap">Kaydet</span>;
     };
 
-    const declarationRotation = currentItem.declaration?.rotation || 0;
-    const freightRotation = currentItem.freight?.rotation || 0;
+    const declarationRotation = localRotations.declaration || 0;
+    const freightRotation = localRotations.freight || 0;
+    const docToRemove = docTypeToDelete && currentItem
+        ? (docTypeToDelete === 'declaration' ? currentItem.declaration : currentItem.freight)
+        : null;
 
     return (
         <div className="fixed inset-0 bg-[var(--color-background)] text-text-primary z-50 flex animate-fade-in">
@@ -777,11 +937,11 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
                                 <button
                                     onClick={handleVerificationToggle}
                                     className={`btn btn-secondary !py-1.5 !px-3 w-40 transition-all duration-300 ease-in-out
-                                        ${verificationState === 'idle' && currentItem.verified ? 'text-success border-success/50' : ''}
+                                        ${verificationState === 'idle' && localVerified ? 'text-success border-success/50' : ''}
                                         ${verificationState === 'confirmed' ? 'bg-success/20 !text-success !border-success/50' : ''}
                                         ${verificationState === 'removed' ? 'bg-danger/20 !text-danger !border-danger/50' : ''}
                                     `}
-                                    title={currentItem.verified ? 'Onayı kaldır' : 'Onaylandı olarak işaretle'}
+                                    title={localVerified ? 'Onayı kaldır' : 'Onaylandı olarak işaretle'}
                                 >
                                     <BadgeCheckIcon className="w-5 h-5"/>
                                     {renderVerificationButtonContent()}
@@ -797,8 +957,12 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
                 </header>
                 
                 <div className="flex-1 flex flex-col md:flex-row overflow-hidden" onMouseMove={handlePanMove} onMouseUp={handlePanEnd} onMouseLeave={handlePanEnd}>
-                    {/* Column 1: Data Entry */}
-                    <div className="w-full h-1/2 md:h-full md:w-[30%] flex-shrink-0 flex flex-col px-2 bg-[var(--color-background-light)] md:border-r border-b md:border-b-0 border-[var(--color-border)]">
+                    {/* Column 1: Data Entry (Resizable) */}
+                    <div
+                        ref={dataPanelRef}
+                        style={!isMobile ? { width: `${sidebarWidth}px` } : {}}
+                        className="flex-shrink-0 w-full h-1/2 md:h-full flex flex-col px-2 bg-[var(--color-background-light)] border-b md:border-b-0 md:border-r border-[var(--color-border)]"
+                    >
                          {isVerifyingPairing ? (
                              <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center animate-fade-in">
                                  <h2 className="text-3xl font-bold text-text-primary">Eşleşmeyi Onayla</h2>
@@ -824,7 +988,7 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
                                                         key={key}
                                                         label={key}
                                                         value={editedData[key] || ''}
-                                                        onChange={(newValue) => setEditedData({ ...editedData, [key]: newValue })}
+                                                        onChange={(newValue) => setEditedData(prev => ({ ...prev, [key]: newValue }))}
                                                         onActivate={setActiveFieldLabel}
                                                         isActive={activeFieldLabel === key}
                                                         setRef={(el) => { fieldRefs.current[key] = el; }}
@@ -841,8 +1005,8 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
                                                         className={`flex items-baseline gap-x-2 border-l-2 py-1 px-2 transition-colors rounded-md ${activeFieldLabel === key ? 'bg-accent/10 border-accent' : 'border-transparent'} ${index % 2 === 0 ? 'bg-[var(--color-background)]' : 'bg-transparent'}`}
                                                         onMouseDown={() => setActiveFieldLabel(key)}
                                                     >
-                                                        <p className="text-2xs text-text-muted font-medium whitespace-nowrap w-1/3 truncate" title={FIELD_LABELS[key]}>{FIELD_LABELS[key]}</p>
-                                                        <div className="flex items-center gap-4 w-2/3">
+                                                        <p className="text-2xs text-text-muted font-medium whitespace-nowrap w-1/4 truncate" title={FIELD_LABELS[key]}>{FIELD_LABELS[key]}</p>
+                                                        <div className="flex items-center gap-4 w-3/4">
                                                             {teslimSekliOptions.map(option => (
                                                                 <label key={option} className="flex items-center cursor-pointer">
                                                                     <input
@@ -850,7 +1014,7 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
                                                                         name="teslim-sekli-radio"
                                                                         value={option}
                                                                         checked={editedData[key] === option}
-                                                                        onChange={(e) => setEditedData({ ...editedData, [key]: e.target.value })}
+                                                                        onChange={(e) => setEditedData(prev => ({ ...prev, [key]: e.target.value }))}
                                                                         className="w-4 h-4 text-accent bg-background border-border focus:ring-accent"
                                                                     />
                                                                     <span className="ml-2 text-2xs font-medium text-text-primary">{option}</span>
@@ -865,7 +1029,7 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
                                                     key={key}
                                                     label={key}
                                                     value={editedData[key] || ''}
-                                                    onChange={(newValue) => setEditedData({ ...editedData, [key]: newValue })}
+                                                    onChange={(newValue) => setEditedData(prev => ({ ...prev, [key]: newValue }))}
                                                     onActivate={setActiveFieldLabel}
                                                     isActive={activeFieldLabel === key}
                                                     setRef={(el) => { fieldRefs.current[key] = el; }}
@@ -874,14 +1038,14 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
                                             );
                                         })}
                                         <div ref={(el) => { fieldRefs.current['TAREKS-TARIM-TSE'] = el; }} key="TAREKS-TARIM-TSE" className={`flex items-baseline gap-x-2 border-l-2 py-1 px-2 transition-colors rounded-md ${activeFieldLabel === 'TAREKS-TARIM-TSE' ? 'bg-accent/10 border-accent' : 'border-transparent'} ${tareksIndex % 2 === 0 ? 'bg-[var(--color-background)]' : 'bg-transparent'}`} onMouseDown={() => setActiveFieldLabel('TAREKS-TARIM-TSE')}>
-                                            <p className="text-2xs text-text-muted font-medium whitespace-nowrap w-1/3 truncate">{FIELD_LABELS['TAREKS-TARIM-TSE'] || 'TAREKS-TARIM-TSE'}</p>
-                                            <div className="flex items-center gap-4 w-2/3">
+                                            <p className="text-2xs text-text-muted font-medium whitespace-nowrap w-1/4 truncate">{FIELD_LABELS['TAREKS-TARIM-TSE'] || 'TAREKS-TARIM-TSE'}</p>
+                                            <div className="flex items-center gap-4 w-3/4">
                                                 <label className="flex items-center cursor-pointer">
-                                                    <input type="radio" name="tareks-radio" value="VAR" checked={editedData['TAREKS-TARIM-TSE'] === 'VAR'} onChange={(e) => setEditedData({ ...editedData, 'TAREKS-TARIM-TSE': e.target.value })} className="w-4 h-4 text-accent bg-background border-border focus:ring-accent"/>
+                                                    <input type="radio" name="tareks-radio" value="VAR" checked={editedData['TAREKS-TARIM-TSE'] === 'VAR'} onChange={(e) => setEditedData(prev => ({ ...prev, 'TAREKS-TARIM-TSE': e.target.value }))} className="w-4 h-4 text-accent bg-background border-border focus:ring-accent"/>
                                                     <span className="ml-2 text-2xs font-medium text-text-primary">VAR</span>
                                                 </label>
                                                 <label className="flex items-center cursor-pointer">
-                                                    <input type="radio" name="tareks-radio" value="YOK" checked={editedData['TAREKS-TARIM-TSE'] === 'YOK'} onChange={(e) => setEditedData({ ...editedData, 'TAREKS-TARIM-TSE': e.target.value })} className="w-4 h-4 text-accent bg-background border-border focus:ring-accent"/>
+                                                    <input type="radio" name="tareks-radio" value="YOK" checked={editedData['TAREKS-TARIM-TSE'] === 'YOK'} onChange={(e) => setEditedData(prev => ({ ...prev, 'TAREKS-TARIM-TSE': e.target.value }))} className="w-4 h-4 text-accent bg-background border-border focus:ring-accent"/>
                                                     <span className="ml-2 text-2xs font-medium text-text-primary">YOK</span>
                                                 </label>
                                             </div>
@@ -889,82 +1053,109 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
                                     </div>
                                     <h4 className="text-base font-bold text-center text-text-primary border-b border-border pb-2 mt-4 mb-2">Navlun Faturası Bilgileri</h4>
                                     <div className="space-y-0">
-                                        {FREIGHT_FIELDS.map((key, index) => ( <EditableField key={key} label={key} value={editedData[key] || ''} onChange={(newValue) => setEditedData({ ...editedData, [key]: newValue })} onActivate={setActiveFieldLabel} isActive={activeFieldLabel === key} setRef={(el) => { fieldRefs.current[key] = el; }} isEven={index % 2 === 0} /> ))}
+                                        {FREIGHT_FIELDS.map((key, index) => ( 
+                                            <EditableField 
+                                                key={key} 
+                                                label={key} 
+                                                value={editedData[key] || ''} 
+                                                onChange={(newValue) => setEditedData(prev => ({ ...prev, [key]: newValue }))} 
+                                                onActivate={setActiveFieldLabel} 
+                                                isActive={activeFieldLabel === key} 
+                                                setRef={(el) => { fieldRefs.current[key] = el; }} 
+                                                isEven={index % 2 === 0}
+                                                readOnly={key === 'TT' || key === 'w/m navlun' || key === 'KAYIT TARİHİ'}
+                                                datalistId={key === 'Nakliyeci' ? 'nakliyeci-list' : undefined}
+                                                datalistOptions={key === 'Nakliyeci' ? nakliyeciOptions : undefined}
+                                            /> 
+                                        ))}
                                     </div>
                                 </div>
                             </div>
                         )}
                     </div>
-                    {/* Column 2: Beyanname Viewer */}
-                    <div className="w-full h-1/2 md:h-full md:w-[35%] flex flex-col bg-[var(--color-background)] min-w-0 md:border-r border-b md:border-b-0 border-border p-2">
-                        <div className="flex-shrink-0 flex items-center justify-between pb-2 px-2">
-                            <p className="font-bold text-text-primary">Beyanname</p>
-                             <div className="flex items-center gap-1 bg-background-light/80 backdrop-blur-sm p-1 rounded-lg border border-border">
-                                <button onClick={() => handleRotate('declaration', 'left')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Sola Döndür (90°)">
-                                    <RotateCcwIcon className="w-5 h-5"/>
-                                </button>
-                                <button onClick={() => handleRotate('declaration', 'right')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Sağa Döndür (90°)">
-                                    <RotateCwIcon className="w-5 h-5"/>
-                                </button>
-                                <button onClick={() => handleZoom('declaration', 'out')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Uzaklaş"><ZoomOutIcon className="w-5 h-5"/></button>
-                                <button onClick={() => handleZoom('declaration', 'reset')} className="px-2 py-1.5 rounded-md hover:bg-border text-xs font-bold" title="Sıfırla">1:1</button>
-                                <button onClick={() => handleZoom('declaration', 'in')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Yakınlaş"><ZoomInIcon className="w-5 h-5"/></button>
-                                <button
-                                    onClick={() => handleDeleteClick('declaration')}
-                                    disabled={!currentItem.declaration || !currentItem.freight}
-                                    className="p-1.5 rounded-md text-text-muted hover:bg-danger/20 hover:text-danger disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-text-muted transition-colors"
-                                    title="Bu belgeyi sil ve kaydır"
-                                >
-                                    <TrashIcon className="w-5 h-5"/>
-                                </button>
-                            </div>
-                        </div>
-                        <div ref={declarationViewerRef} className="flex-1 bg-border/20 rounded-lg overflow-hidden relative" onWheel={(e) => handleWheelZoom(e, 'declaration')}>
-                             {currentItem.declaration?.fullResolutionDataUrl ? (
-                                <div onMouseDown={(e) => handlePanStart(e, 'declaration')} style={{ transform: `translate(${declarationTransform.x}px, ${declarationTransform.y}px) scale(${declarationTransform.scale})`, cursor: panningState ? 'grabbing' : 'grab', transformOrigin: 'top left' }} className="w-full h-full flex items-center justify-center">
-                                    <img src={currentItem.declaration.fullResolutionDataUrl} alt={currentItem.declaration.fileName} className="max-w-full max-h-full" style={{ transform: `rotate(${declarationRotation}deg)` }} draggable="false" />
-                                </div>
-                            ) : (
-                                <div className="w-full h-full flex flex-col items-center justify-center text-text-muted"><FileIcon className="w-16 h-16"/><p className="mt-2 font-semibold">Belge Yok</p></div>
-                            )}
-                        </div>
+
+                    {/* Resizer Handle */}
+                    <div
+                        onMouseDown={!isMobile ? handleMouseDown : undefined}
+                        className="hidden md:flex items-center justify-center w-3 h-full cursor-col-resize group transition-colors bg-[var(--color-background)] hover:bg-accent/10 flex-shrink-0"
+                    >
+                        <GripVerticalIcon className="w-6 h-6 text-border group-hover:text-accent transition-colors" />
                     </div>
 
-                    {/* Column 3: Navlun Viewer */}
-                    <div className="w-full h-1/2 md:h-full md:w-[35%] flex flex-col bg-[var(--color-background)] min-w-0 p-2">
-                         <div className="flex-shrink-0 flex items-center justify-between pb-2 px-2">
-                             <p className="font-bold text-text-primary">Navlun Faturası</p>
-                             <div className="flex items-center gap-1 bg-background-light/80 backdrop-blur-sm p-1 rounded-lg border border-border">
-                                <button onClick={() => handleRotate('freight', 'left')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Sola Döndür (90°)">
-                                    <RotateCcwIcon className="w-5 h-5"/>
-                                </button>
-                                <button onClick={() => handleRotate('freight', 'right')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Sağa Döndür (90°)">
-                                    <RotateCwIcon className="w-5 h-5"/>
-                                </button>
-                                <button onClick={() => handleZoom('freight', 'out')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Uzaklaş"><ZoomOutIcon className="w-5 h-5"/></button>
-                                <button onClick={() => handleZoom('freight', 'reset')} className="px-2 py-1.5 rounded-md hover:bg-border text-xs font-bold" title="Sıfırla">1:1</button>
-                                <button onClick={() => handleZoom('freight', 'in')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Yakınlaş"><ZoomInIcon className="w-5 h-5"/></button>
-                                <button
-                                    onClick={() => handleDeleteClick('freight')}
-                                    disabled={!currentItem.declaration || !currentItem.freight}
-                                    className="p-1.5 rounded-md text-text-muted hover:bg-danger/20 hover:text-danger disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-text-muted transition-colors"
-                                    title="Bu belgeyi sil ve kaydır"
-                                >
-                                    <TrashIcon className="w-5 h-5"/>
-                                </button>
+                    {/* Viewers Container */}
+                    <div className="flex-1 flex flex-col md:flex-row overflow-hidden min-w-0 h-1/2 md:h-full">
+                        {/* Column 2: Beyanname Viewer */}
+                        <div className="w-full h-1/2 md:w-1/2 md:h-full flex flex-col bg-[var(--color-background)] min-w-0 md:border-r border-b md:border-b-0 border-border p-2">
+                            <div className="flex-shrink-0 flex items-center justify-between pb-2 px-2">
+                                <p className="font-bold text-text-primary">Beyanname</p>
+                                <div className="flex items-center gap-1 bg-background-light/80 backdrop-blur-sm p-1 rounded-lg border border-border">
+                                    <button onClick={() => handleRotate('declaration', 'left')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Sola Döndür (90°)">
+                                        <RotateCcwIcon className="w-5 h-5"/>
+                                    </button>
+                                    <button onClick={() => handleRotate('declaration', 'right')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Sağa Döndür (90°)">
+                                        <RotateCwIcon className="w-5 h-5"/>
+                                    </button>
+                                    <button onClick={() => handleZoom('declaration', 'out')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Uzaklaş"><ZoomOutIcon className="w-5 h-5"/></button>
+                                    <button onClick={() => handleZoom('declaration', 'reset')} className="px-2 py-1.5 rounded-md hover:bg-border text-xs font-bold" title="Sıfırla">1:1</button>
+                                    <button onClick={() => handleZoom('declaration', 'in')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Yakınlaş"><ZoomInIcon className="w-5 h-5"/></button>
+                                    <button
+                                        onClick={() => handleDeleteClick('declaration')}
+                                        disabled={!currentItem.declaration || !currentItem.freight}
+                                        className="p-1.5 rounded-md text-text-muted hover:bg-danger/20 hover:text-danger disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-text-muted transition-colors"
+                                        title="Bu belgeyi eşleşmeden sil"
+                                    >
+                                        <TrashIcon className="w-5 h-5"/>
+                                    </button>
+                                </div>
+                            </div>
+                            <div ref={declarationViewerRef} className="flex-1 bg-border/20 rounded-lg overflow-hidden relative" onWheel={(e) => handleWheelZoom(e, 'declaration')}>
+                                {currentItem.declaration?.fullResolutionDataUrl ? (
+                                    <div onMouseDown={(e) => handlePanStart(e, 'declaration')} style={{ transform: `translate(${declarationTransform.x}px, ${declarationTransform.y}px) scale(${declarationTransform.scale})`, cursor: panningState ? 'grabbing' : 'grab', transformOrigin: 'top left' }} className="w-full h-full flex items-center justify-center">
+                                        <img src={currentItem.declaration.fullResolutionDataUrl} alt={currentItem.declaration.fileName} className="max-w-full max-h-full" style={{ transform: `rotate(${declarationRotation}deg)` }} draggable="false" />
+                                    </div>
+                                ) : (
+                                    <div className="w-full h-full flex flex-col items-center justify-center text-text-muted"><FileIcon className="w-16 h-16"/><p className="mt-2 font-semibold">Belge Yok</p></div>
+                                )}
                             </div>
                         </div>
-                        <div ref={freightViewerRef} className="flex-1 bg-border/20 rounded-lg overflow-hidden relative" onWheel={(e) => handleWheelZoom(e, 'freight')}>
-                             {currentItem.freight?.fullResolutionDataUrl ? (
-                                <div onMouseDown={(e) => handlePanStart(e, 'freight')} style={{ transform: `translate(${freightTransform.x}px, ${freightTransform.y}px) scale(${freightTransform.scale})`, cursor: panningState ? 'grabbing' : 'grab', transformOrigin: 'top left' }} className="w-full h-full flex items-center justify-center">
-                                    <img src={currentItem.freight.fullResolutionDataUrl} alt={currentItem.freight.fileName} className="max-w-full max-h-full" style={{ transform: `rotate(${freightRotation}deg)` }} draggable="false" />
+
+                        {/* Column 3: Navlun Viewer */}
+                        <div className="w-full h-1/2 md:w-1/2 md:h-full flex flex-col bg-[var(--color-background)] min-w-0 p-2">
+                            <div className="flex-shrink-0 flex items-center justify-between pb-2 px-2">
+                                <p className="font-bold text-text-primary">Navlun Faturası</p>
+                                <div className="flex items-center gap-1 bg-background-light/80 backdrop-blur-sm p-1 rounded-lg border border-border">
+                                    <button onClick={() => handleRotate('freight', 'left')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Sola Döndür (90°)">
+                                        <RotateCcwIcon className="w-5 h-5"/>
+                                    </button>
+                                    <button onClick={() => handleRotate('freight', 'right')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Sağa Döndür (90°)">
+                                        <RotateCwIcon className="w-5 h-5"/>
+                                    </button>
+                                    <button onClick={() => handleZoom('freight', 'out')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Uzaklaş"><ZoomOutIcon className="w-5 h-5"/></button>
+                                    <button onClick={() => handleZoom('freight', 'reset')} className="px-2 py-1.5 rounded-md hover:bg-border text-xs font-bold" title="Sıfırla">1:1</button>
+                                    <button onClick={() => handleZoom('freight', 'in')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Yakınlaş"><ZoomInIcon className="w-5 h-5"/></button>
+                                    <button
+                                        onClick={() => handleDeleteClick('freight')}
+                                        disabled={!currentItem.declaration || !currentItem.freight}
+                                        className="p-1.5 rounded-md text-text-muted hover:bg-danger/20 hover:text-danger disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-text-muted transition-colors"
+                                        title="Bu belgeyi eşleşmeden sil"
+                                    >
+                                        <TrashIcon className="w-5 h-5"/>
+                                    </button>
                                 </div>
-                            ) : (
-                                <div className="w-full h-full flex flex-col items-center justify-center text-text-muted"><FileIcon className="w-16 h-16"/><p className="mt-2 font-semibold">Belge Yok</p></div>
-                            )}
+                            </div>
+                            <div ref={freightViewerRef} className="flex-1 bg-border/20 rounded-lg overflow-hidden relative" onWheel={(e) => handleWheelZoom(e, 'freight')}>
+                                {currentItem.freight?.fullResolutionDataUrl ? (
+                                    <div onMouseDown={(e) => handlePanStart(e, 'freight')} style={{ transform: `translate(${freightTransform.x}px, ${freightTransform.y}px) scale(${freightTransform.scale})`, cursor: panningState ? 'grabbing' : 'grab', transformOrigin: 'top left' }} className="w-full h-full flex items-center justify-center">
+                                        <img src={currentItem.freight.fullResolutionDataUrl} alt={currentItem.freight.fileName} className="max-w-full max-h-full" style={{ transform: `rotate(${freightRotation}deg)` }} draggable="false" />
+                                    </div>
+                                ) : (
+                                    <div className="w-full h-full flex flex-col items-center justify-center text-text-muted"><FileIcon className="w-16 h-16"/><p className="mt-2 font-semibold">Belge Yok</p></div>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>
+
 
                  {/* Navigation controls */}
                 <button onClick={() => handleNavigateByIndex(-1)} disabled={currentItemIndex <= 0} className="absolute left-1/4 top-1/2 -translate-y-1/2 z-30 p-2 bg-black/40 text-white rounded-full hover:bg-black/60 disabled:opacity-0 disabled:pointer-events-none transition-opacity"><ChevronLeftIcon className="w-6 h-6"/></button>
@@ -984,15 +1175,17 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
                     </div>
                 </div>
             )}
-            {docToDelete && (
-                <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[60] animate-fade-in p-4" onClick={() => setDocToDelete(null)}>
+            {docTypeToDelete && docToRemove && (
+                <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[60] animate-fade-in p-4" onClick={() => setDocTypeToDelete(null)}>
                     <div className="modern-card rounded-2xl p-8 max-w-md w-full text-center" onMouseDown={e => e.stopPropagation()}>
                         <ErrorIcon className="w-16 h-16 mx-auto text-[var(--color-danger)] mb-4" />
-                        <h2 className="text-2xl font-bold text-text-primary mb-2">Belgeyi Sil ve Kaydır</h2>
-                        <p className="text-text-secondary mb-8">Bu belgeyi kalıcı olarak silmek üzeresiniz. Sonraki tüm belgeler sola kaydırılacak ve yeniden eşleştirilecektir. Bu işlem geri alınamaz. Emin misiniz?</p>
+                        <h2 className="text-2xl font-bold text-text-primary mb-2">Belgeyi Sil</h2>
+                        <p className="text-text-secondary mb-8">
+                           <span className="font-bold break-all">"{docToRemove.fileName}"</span> belgesini bu eşleşmeden kalıcı olarak silmek istediğinizden emin misiniz? Kalan belge yeniden eşleştirilmek üzere tek kalacaktır.
+                        </p>
                         <div className="flex justify-center gap-4">
-                            <button onClick={() => setDocToDelete(null)} className="btn btn-secondary w-full">İptal</button>
-                            <button onClick={handleConfirmDeleteAndRePair} className="btn btn-danger w-full">Evet, Sil ve Kaydır</button>
+                            <button onClick={() => setDocTypeToDelete(null)} className="btn btn-secondary w-full">İptal</button>
+                            <button onClick={handleConfirmDelete} className="btn btn-danger w-full">Evet, Sil</button>
                         </div>
                     </div>
                 </div>

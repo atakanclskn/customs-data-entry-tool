@@ -22,14 +22,14 @@ export interface DeclarationData {
   'Fat. Tarihi'?: string;
   'Tahmini Çıkış Tarihi'?: string;
   'Varış Tarihi'?: string;
+  'TT'?: string;
   'Çıkış Limanı'?: string;
-  'HBL'?: string;
   'Hacim'?: string;
   'Rakip Navlun w/m'?: string;
+  'w/m navlun'?: string;
   'Navlun Fatura Tutarı'?: string;
   'Rakip EXW / FCA'?: string;
   'All in Fatura Tutarı'?: string;
-  'Konsol/Komple'?: string;
   'Öykü Dönem Navlun w/m'?: string;
   'Total Fark w/m'?: string;
   'Varış Limanı'?: string;

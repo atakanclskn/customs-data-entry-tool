@@ -1,7 +1,6 @@
-
 import React, { useState, useMemo } from 'react';
 import { HistoryEntry, NavigateFunction, Page, DocumentType } from '../types';
-import { HistoryIcon, TrashIcon, ChevronRightIcon, ErrorIcon, DownloadIcon, SearchIcon, ArrowUpIcon, ArrowDownIcon, DocumentTextIcon, CheckCircleIcon, ExpandIcon } from './Icons';
+import { HistoryIcon, TrashIcon, ChevronRightIcon, ErrorIcon, DownloadIcon, SearchIcon, ArrowUpIcon, ArrowDownIcon, DocumentTextIcon, CheckCircleIcon, ExpandIcon, LinkIcon } from './Icons';
 import ResultsDisplay from './ResultsDisplay';
 import * as XLSX from 'xlsx';
 import { EXCEL_EXPORT_ORDER } from '../constants';
@@ -53,6 +52,11 @@ const HistoryItem: React.FC<HistoryItemProps> = ({ entry, onDelete, navigate, is
     const subtitle = entry.declaration && entry.freight 
         ? `${entry.declaration.fileName} / ${entry.freight.fileName}`
         : 'Tek belge';
+    const isSingleDocument = (entry.declaration && !entry.freight) || (!entry.declaration && entry.freight);
+
+    // Determine the correct context for the fullscreen view. Unverified pairs go to the 'analysis' (verification) view.
+    const isUnverifiedPair = entry.pairingVerified === false && entry.declaration && entry.freight;
+    const contextForFullscreen = isUnverifiedPair ? 'analysis' : 'history';
 
     return (
         <div className={itemContainerClasses}>
@@ -81,7 +85,14 @@ const HistoryItem: React.FC<HistoryItemProps> = ({ entry, onDelete, navigate, is
                     }
                 </div>
                 <div className="flex-grow flex flex-col overflow-hidden pr-2">
-                    <span className="font-semibold text-text-primary truncate" title={subtitle}>{title}</span>
+                    <div className="flex items-center gap-2">
+                        <span className="font-semibold text-text-primary truncate" title={subtitle}>{title}</span>
+                        {isSingleDocument && (
+                            <span title="Bu belge eşleştirilmeyi bekliyor">
+                                <LinkIcon className="w-4 h-4 text-text-muted flex-shrink-0" />
+                            </span>
+                        )}
+                    </div>
                     <span className="text-xs text-text-muted">
                         {new Date(entry.analyzedAt).toLocaleString('tr-TR')}
                     </span>
@@ -108,7 +119,7 @@ const HistoryItem: React.FC<HistoryItemProps> = ({ entry, onDelete, navigate, is
                         ) : (
                             <>
                                 <button 
-                                    onClick={(e) => { e.stopPropagation(); onOpenInFullscreen('history', entry.id); }}
+                                    onClick={(e) => { e.stopPropagation(); onOpenInFullscreen(contextForFullscreen, entry.id); }}
                                     className="p-2 rounded-full text-text-muted hover:bg-accent/20 hover:text-accent transition-colors"
                                     aria-label="Düzenleme modunda aç"
                                 >

@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Page, NavigateFunction, Theme, HistoryEntry } from '../types';
 import { AnalysisIcon, HistoryIcon, XIcon, ExpandIcon, LinkIcon, ChevronsLeftIcon, ChevronsRightIcon } from './Icons';
@@ -46,6 +47,20 @@ const NavItem: React.FC<NavItemProps> = ({ icon, label, page, currentPage, onNav
 };
 
 const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, isOpen, setIsOpen, theme, onThemeChange, history, onOpenInFullscreen, isCollapsed, onToggle }) => {
+  // The history is sorted by date descending, so the first item is the most recent.
+  const mostRecentItem = history.length > 0 ? history[0] : null;
+
+  const handleEditClick = () => {
+    if (mostRecentItem) {
+      // Determine the correct context: unverified pairs go to the 'analysis' (verification) view.
+      const isUnverifiedPair = mostRecentItem.pairingVerified === false && mostRecentItem.declaration && mostRecentItem.freight;
+      const context = isUnverifiedPair ? 'analysis' : 'history';
+      onOpenInFullscreen(context, mostRecentItem.id);
+      setIsOpen(false);
+    }
+  };
+
+
   return (
     <>
       {/* Overlay for mobile */}
@@ -74,15 +89,10 @@ const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, isOpen, setI
             <NavItem icon={<AnalysisIcon className="w-6 h-6"/>} label="Veri" page={Page.ANALYSIS} currentPage={currentPage} onNavigate={onNavigate} isCollapsed={isCollapsed} />
             <li title={isCollapsed ? "Düzenle" : ''}>
                 <button
-                    onClick={() => {
-                        if (history.length > 0) {
-                            onOpenInFullscreen('history', history[0].id);
-                            setIsOpen(false);
-                        }
-                    }}
-                    disabled={history.length === 0}
+                    onClick={handleEditClick}
+                    disabled={!mostRecentItem}
                     className={`w-full flex items-center p-3 rounded-lg transition-all duration-200 ease-in-out text-text-secondary hover:text-text-primary hover:bg-[var(--color-background)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-text-secondary ${isCollapsed ? 'justify-center' : 'space-x-4'}`}
-                    title={isCollapsed ? "Düzenle" : (history.length === 0 ? "Önce bir belge yükleyin" : "En son belgeyi düzenleyicide aç")}
+                    title={isCollapsed ? "Düzenle" : (!mostRecentItem ? "Önce bir belge yükleyin" : "En son belgeyi düzenleyicide aç")}
                 >
                     <ExpandIcon className="w-6 h-6"/>
                     <span className={`font-semibold ${isCollapsed ? 'hidden' : 'inline'}`}>Düzenle</span>

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { HistoryEntry, DocumentInfo, NavigateFunction } from '../types';
 import { LinkIcon, FileIcon, PencilIcon, GripVerticalIcon, XIcon, SparklesIcon, RotateCcwIcon, RotateCwIcon, ZoomOutIcon, ZoomInIcon } from './Icons';
 
@@ -8,7 +8,6 @@ interface PairingPageProps {
     onCreatePair: (id1: string, id2: string) => Promise<void>;
     onUpdateEntry: (entry: HistoryEntry) => Promise<void>;
     navigate: NavigateFunction;
-    onAutoPairRemaining: (entries: HistoryEntry[]) => Promise<void>;
 }
 
 // A single card in the sortable list
@@ -165,10 +164,10 @@ const InteractiveViewer: React.FC<{
 };
 
 
-const PairingPage: React.FC<PairingPageProps> = ({ history, onCreatePair, onUpdateEntry, onAutoPairRemaining }) => {
+const PairingPage: React.FC<PairingPageProps> = ({ history, onCreatePair, onUpdateEntry }) => {
     const [unpairedEntries, setUnpairedEntries] = useState<HistoryEntry[]>([]);
-    const [declarationSlot, setDeclarationSlot] = useState<HistoryEntry | null>(null);
-    const [freightSlot, setFreightSlot] = useState<HistoryEntry | null>(null);
+    const [declarationSlotId, setDeclarationSlotId] = useState<string | null>(null);
+    const [freightSlotId, setFreightSlotId] = useState<string | null>(null);
 
     // Drag states
     const [draggedItem, setDraggedItem] = useState<HistoryEntry | null>(null);
@@ -185,6 +184,47 @@ const PairingPage: React.FC<PairingPageProps> = ({ history, onCreatePair, onUpda
     const [declarationTransform, setDeclarationTransform] = useState({ scale: 1, x: 0, y: 0 });
     const [freightTransform, setFreightTransform] = useState({ scale: 1, x: 0, y: 0 });
     const [panningState, setPanningState] = useState<{ slot: 'declaration' | 'freight', startX: number, startY: number } | null>(null);
+    
+    // Resizable panel state
+    const listPanelRef = useRef<HTMLDivElement>(null);
+    const [listPanelWidth, setListPanelWidth] = useState(window.innerWidth * 0.4);
+    const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+
+
+    useEffect(() => {
+        const checkMobile = () => setIsMobile(window.innerWidth < 768);
+        window.addEventListener('resize', checkMobile);
+        return () => window.removeEventListener('resize', checkMobile);
+    }, []);
+
+    const handleMouseDown = useCallback((e: React.MouseEvent) => {
+        e.preventDefault();
+        const startX = e.clientX;
+        const startWidth = listPanelRef.current?.offsetWidth || listPanelWidth;
+
+        const handleMouseMove = (moveEvent: MouseEvent) => {
+            const dx = moveEvent.clientX - startX;
+            const newWidth = startWidth + dx;
+            const minWidth = 300;
+            const containerWidth = listPanelRef.current?.parentElement?.offsetWidth || window.innerWidth;
+            const maxWidth = containerWidth - 500;
+            const constrainedWidth = Math.max(minWidth, Math.min(newWidth, maxWidth));
+            setListPanelWidth(constrainedWidth);
+        };
+
+        const handleMouseUp = () => {
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+        };
+
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+    }, [listPanelWidth]);
+
+
+    // Get up-to-date entry data from props using stored IDs
+    const declarationSlot = useMemo(() => history.find(e => e.id === declarationSlotId) || null, [history, declarationSlotId]);
+    const freightSlot = useMemo(() => history.find(e => e.id === freightSlotId) || null, [history, freightSlotId]);
 
 
     // Filter and sort history to get unpaired items
@@ -265,45 +305,39 @@ const PairingPage: React.FC<PairingPageProps> = ({ history, onCreatePair, onUpda
 
         if (!droppedItem) return;
         
-        if ((slot === 'declaration' && freightSlot?.id === droppedId) || (slot === 'freight' && declarationSlot?.id === droppedId)) return;
+        if ((slot === 'declaration' && freightSlotId === droppedId) || (slot === 'freight' && declarationSlotId === droppedId)) return;
 
         if (slot === 'declaration') {
-            setDeclarationSlot(droppedItem);
+            setDeclarationSlotId(droppedItem.id);
             setDeclarationTransform({ scale: 1, x: 0, y: 0 }); // Reset view on new doc
         } else {
-            setFreightSlot(droppedItem);
+            setFreightSlotId(droppedItem.id);
             setFreightTransform({ scale: 1, x: 0, y: 0 }); // Reset view on new doc
         }
     };
 
     const handleClearSlot = (slot: 'declaration' | 'freight') => {
-        if (slot === 'declaration') setDeclarationSlot(null);
-        else setFreightSlot(null);
+        if (slot === 'declaration') setDeclarationSlotId(null);
+        else setFreightSlotId(null);
     };
 
     const handlePair = () => {
-        if (declarationSlot && freightSlot) {
-            onCreatePair(declarationSlot.id, freightSlot.id).then(() => {
-                setDeclarationSlot(null);
-                setFreightSlot(null);
+        if (declarationSlotId && freightSlotId) {
+            onCreatePair(declarationSlotId, freightSlotId).then(() => {
+                setDeclarationSlotId(null);
+                setFreightSlotId(null);
             });
         }
     };
     
-    const handleAutoPair = () => {
-        const itemsToPair = displayedUnpairedEntries;
-        if (itemsToPair.length > 1) {
-            onAutoPairRemaining(itemsToPair);
-        }
-    };
-
     const displayedUnpairedEntries = useMemo(() => {
-        return unpairedEntries.filter(e => e.id !== declarationSlot?.id && e.id !== freightSlot?.id);
-    }, [unpairedEntries, declarationSlot, freightSlot]);
+        return unpairedEntries.filter(e => e.id !== declarationSlotId && e.id !== freightSlotId);
+    }, [unpairedEntries, declarationSlotId, freightSlotId]);
 
     // --- Viewer Control Handlers ---
     const handleRotate = (slot: 'declaration' | 'freight', direction: 'left' | 'right') => {
-        const entry = slot === 'declaration' ? declarationSlot : freightSlot;
+        const entryId = slot === 'declaration' ? declarationSlotId : freightSlotId;
+        const entry = history.find(e => e.id === entryId);
         if (!entry) return;
 
         const docToUpdate = entry.declaration || entry.freight;
@@ -379,15 +413,6 @@ const PairingPage: React.FC<PairingPageProps> = ({ history, onCreatePair, onUpda
                     <p className="text-md text-text-secondary mt-1">Belgeleri sıralayın ve eşleştirmek için sağdaki alanlara sürükleyin.</p>
                 </div>
                 <div className="flex items-center gap-4">
-                     <button 
-                        onClick={handleAutoPair} 
-                        disabled={displayedUnpairedEntries.length < 2}
-                        className="btn btn-secondary"
-                        title="Kalan belgeleri isme göre otomatik olarak eşleştirir."
-                    >
-                        <SparklesIcon className="w-5 h-5"/>
-                        Kalanları Otomatik Eşleştir
-                    </button>
                     <button onClick={handlePair} disabled={!declarationSlot || !freightSlot} className="btn btn-primary w-48">
                         <LinkIcon className="w-5 h-5" />
                         Eşleştir
@@ -395,37 +420,52 @@ const PairingPage: React.FC<PairingPageProps> = ({ history, onCreatePair, onUpda
                 </div>
             </div>
 
-            <div className="flex-1 flex gap-6 min-h-0">
-                {/* Left Panel: Unpaired Documents */}
-                <aside className="w-2/5 h-full flex flex-col">
-                    <h2 className="text-lg font-semibold text-text-primary mb-2">Sıralama Alanı ({displayedUnpairedEntries.length})</h2>
-                    <div className="flex-1 overflow-y-auto pr-2 grid grid-cols-2 gap-4" onDragLeave={() => setDropTargetId(null)} onDragEnd={handleDragEnd}>
-                        {displayedUnpairedEntries.length > 0 ? displayedUnpairedEntries.map(entry => (
-                            <SortableItem
-                                key={entry.id}
-                                entry={entry}
-                                isEditing={editingId === entry.id}
-                                tempName={tempName}
-                                setTempName={setTempName}
-                                onStartEdit={handleStartEdit}
-                                onConfirmEdit={handleConfirmEdit}
-                                onCancelEdit={() => setEditingId(null)}
-                                onDragStart={handleDragStart}
-                                onDragOver={(e, target) => { e.preventDefault(); setDropTargetId(target.id); }}
-                                onDrop={handleDropOnList}
-                                isDragged={draggedItem?.id === entry.id}
-                                isDropTarget={dropTargetId === entry.id}
-                            />
-                        )) : (
-                            <div className="text-center py-16 text-text-muted col-span-2">
-                                <p>Eşleştirilecek belge bulunmuyor.</p>
-                            </div>
-                        )}
+            <div className="flex-1 flex flex-col md:flex-row min-h-0">
+                {/* Left Panel: Unpaired Documents (Resizable) */}
+                <aside
+                    ref={listPanelRef}
+                    style={!isMobile ? { width: `${listPanelWidth}px` } : {}}
+                    className="h-1/2 md:h-full flex flex-col flex-shrink-0"
+                >
+                    <div className="p-2 h-full flex flex-col">
+                        <h2 className="text-lg font-semibold text-text-primary mb-2 flex-shrink-0">Sıralama Alanı ({displayedUnpairedEntries.length})</h2>
+                        <div className="flex-1 overflow-y-auto pr-2 grid grid-cols-2 gap-4" onDragLeave={() => setDropTargetId(null)} onDragEnd={handleDragEnd}>
+                            {displayedUnpairedEntries.length > 0 ? displayedUnpairedEntries.map(entry => (
+                                <SortableItem
+                                    key={entry.id}
+                                    entry={entry}
+                                    isEditing={editingId === entry.id}
+                                    tempName={tempName}
+                                    setTempName={setTempName}
+                                    onStartEdit={handleStartEdit}
+                                    onConfirmEdit={handleConfirmEdit}
+                                    onCancelEdit={() => setEditingId(null)}
+                                    onDragStart={handleDragStart}
+                                    onDragOver={(e, target) => { e.preventDefault(); setDropTargetId(target.id); }}
+                                    onDrop={handleDropOnList}
+                                    isDragged={draggedItem?.id === entry.id}
+                                    isDropTarget={dropTargetId === entry.id}
+                                />
+                            )) : (
+                                <div className="text-center py-16 text-text-muted col-span-2">
+                                    <p>Eşleştirilecek belge bulunmuyor.</p>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </aside>
 
+                 {/* Resizer Handle */}
+                <div
+                    onMouseDown={!isMobile ? handleMouseDown : undefined}
+                    className="hidden md:flex items-center justify-center w-3 h-full cursor-col-resize group transition-colors bg-transparent hover:bg-accent/10 flex-shrink-0"
+                >
+                    <GripVerticalIcon className="w-6 h-6 text-border group-hover:text-accent transition-colors" />
+                </div>
+
+
                 {/* Right Panel: Pairing Area */}
-                <main className="w-3/5 h-full flex gap-4 border-l border-border pl-6">
+                <main className="flex-1 h-1/2 md:h-full flex flex-col md:flex-row gap-4 min-w-0 p-3">
                     <InteractiveViewer
                         title="Beyanname"
                         entry={declarationSlot}
