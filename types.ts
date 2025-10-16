@@ -25,7 +25,6 @@ export interface DeclarationData {
   'TT'?: string;
   'Çıkış Limanı'?: string;
   'Hacim'?: string;
-  'Rakip Navlun w/m'?: string;
   'w/m navlun'?: string;
   'Navlun Fatura Tutarı'?: string;
   'Rakip EXW / FCA'?: string;

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { HistoryEntry, DocumentInfo, NavigateFunction } from '../types';
 import { LinkIcon, FileIcon, PencilIcon, GripVerticalIcon, XIcon, SparklesIcon, RotateCcwIcon, RotateCwIcon, ZoomOutIcon, ZoomInIcon } from './Icons';
@@ -52,6 +51,7 @@ const SortableItem: React.FC<{
 
     return (
         <div
+            title={doc.fileName}
             draggable={!isEditing}
             onDragStart={!isEditing ? (e) => onDragStart(e, entry) : undefined}
             onDragOver={(e) => onDragOver(e, entry)}
@@ -68,7 +68,7 @@ const SortableItem: React.FC<{
                     />
                 </div>
             </div>
-            <div className="flex items-center p-2 border-t border-border bg-background-light">
+            <div className="flex items-center p-2 bg-[var(--color-background)]">
                 <button draggable onDragStart={(e) => onDragStart(e, entry)} className="p-1 text-text-muted cursor-grab active:cursor-grabbing">
                     <GripVerticalIcon className="w-5 h-5" />
                 </button>

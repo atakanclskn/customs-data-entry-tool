@@ -55,33 +55,27 @@ export const getHistory = async (): Promise<HistoryEntry[]> => {
 
 export const addHistoryEntry = async (
     entryData: { declaration?: DocumentInfo; freight?: DocumentInfo; },
-    options?: { pairingVerified?: boolean | null }
+    options?: { pairingVerified?: boolean | undefined }
 ): Promise<HistoryEntry> => {
     
-    // Create an empty data object with all possible keys initialized to empty strings.
     const emptyData: DeclarationData = {};
     [...DECLARATION_FIELDS, ...FREIGHT_FIELDS].forEach(field => {
         emptyData[field] = '';
     });
-    // Set a default for the radio button field
     emptyData['TAREKS-TARIM-TSE'] = 'YOK';
-    // Set default value for Özet Beyan No
     emptyData['ÖZET BEYAN NO'] = 'IM';
 
-    // Set KAYIT TARİHİ to today's date automatically
     const today = new Date();
     const formattedDate = `${String(today.getDate()).padStart(2, '0')}.${String(today.getMonth() + 1).padStart(2, '0')}.${today.getFullYear()}`;
     emptyData['KAYIT TARİHİ'] = formattedDate;
-
 
     const newEntry: HistoryEntry = {
         id: `hist_${new Date().getTime()}_${Math.random()}`,
         analyzedAt: new Date().toISOString(),
         status: 'SUCCESS',
         data: emptyData,
-        // If option is null, it's a single doc for pairing, so status is undefined.
-        // Otherwise, default to false (unverified pair).
-        pairingVerified: options?.pairingVerified === null ? undefined : (options?.pairingVerified ?? false),
+        // options.pairingVerified can be true (manual pair), false (auto pair), or undefined (single doc)
+        pairingVerified: options?.pairingVerified,
         declaration: entryData.declaration,
         freight: entryData.freight,
     };
@@ -147,8 +141,6 @@ export const clearHistory = async (): Promise<void> => {
     });
 };
 
-// Migration logic is no longer needed with the new simple flow.
 export const migrateFromLocalStorage = async (): Promise<void> => {
-    // This function is now a no-op but is kept to prevent breaking the initial app load sequence.
     return Promise.resolve();
 };

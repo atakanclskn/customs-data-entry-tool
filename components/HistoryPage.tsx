@@ -52,7 +52,7 @@ const HistoryItem: React.FC<HistoryItemProps> = ({ entry, onDelete, navigate, is
     const subtitle = entry.declaration && entry.freight 
         ? `${entry.declaration.fileName} / ${entry.freight.fileName}`
         : 'Tek belge';
-    const isSingleDocument = (entry.declaration && !entry.freight) || (!entry.declaration && entry.freight);
+    const isSingleDocument = !entry.declaration || !entry.freight;
 
     // Determine the correct context for the fullscreen view. Unverified pairs go to the 'analysis' (verification) view.
     const isUnverifiedPair = entry.pairingVerified === false && entry.declaration && entry.freight;
@@ -120,8 +120,10 @@ const HistoryItem: React.FC<HistoryItemProps> = ({ entry, onDelete, navigate, is
                             <>
                                 <button 
                                     onClick={(e) => { e.stopPropagation(); onOpenInFullscreen(contextForFullscreen, entry.id); }}
-                                    className="p-2 rounded-full text-text-muted hover:bg-accent/20 hover:text-accent transition-colors"
-                                    aria-label="Düzenleme modunda aç"
+                                    className="p-2 rounded-full text-text-muted hover:bg-accent/20 hover:text-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    aria-label={isSingleDocument ? "Eşlenmemiş belgeler düzenlenemez" : "Düzenleme modunda aç"}
+                                    disabled={isSingleDocument}
+                                    title={isSingleDocument ? "Eşlenmemiş belgeler manuel eşleştirme sayfasından düzenlenir" : "Düzenleme modunda aç"}
                                 >
                                     <ExpandIcon className="w-5 h-5"/>
                                 </button>

@@ -63,6 +63,7 @@ function App() {
 
   const handleUpdateHistoryEntry = useCallback(async (updatedEntry: HistoryEntry) => {
       const savedEntry = await historyService.updateHistoryEntry(updatedEntry);
+      
       setHistory(prev => prev.map(entry => entry.id === savedEntry.id ? savedEntry : entry));
   }, []);
   
@@ -98,54 +99,42 @@ function App() {
     const entryToReject = history.find(e => e.id === entryId);
     if (!entryToReject) return;
 
-    const isHistoryContext = fullscreenViewData?.context === 'history';
-
-    // 1. Determine the original position of the item in the current view.
-    const currentItems = isHistoryContext
-        ? history
-        : history.filter(h => h.pairingVerified === false && h.declaration && h.freight);
-    const rejectedItemIndex = currentItems.findIndex(item => item.id === entryId);
-
-    // 2. Perform DB operations and get the real new entries.
+    // 1. Break the pair into two new single documents.
     const docsToRecreate: { declaration?: DocumentInfo; freight?: DocumentInfo; }[] = [];
     if (entryToReject.declaration) docsToRecreate.push({ declaration: entryToReject.declaration });
     if (entryToReject.freight) docsToRecreate.push({ freight: entryToReject.freight });
 
-    const newSingleEntries = await Promise.all(
+    const newSingleEntriesPromise = Promise.all(
         docsToRecreate.map(docData => historyService.addHistoryEntry(docData, { pairingVerified: undefined }))
     );
+    
+    // 2. While new singles are being created, figure out where to navigate next.
+    const unverifiedQueue = history.filter(h => h.pairingVerified === false && h.declaration && h.freight);
+    const rejectedItemIndex = unverifiedQueue.findIndex(item => item.id === entryId);
+    let nextItemId: string | null = null;
+    if (rejectedItemIndex !== -1 && rejectedItemIndex + 1 < unverifiedQueue.length) {
+      nextItemId = unverifiedQueue[rejectedItemIndex + 1].id;
+    }
+    
+    // 3. Delete the old incorrect pair from the database.
     await historyService.deleteHistoryEntry(entryId);
 
-    // 3. Manually construct the new history array to predict the next state.
-    const newHistory = [...newSingleEntries, ...history.filter(e => e.id !== entryId)]
-        .sort((a, b) => new Date(b.analyzedAt).getTime() - new Date(a.analyzedAt).getTime());
+    // 4. Await the creation of the new single entries.
+    const newSingleEntries = await newSingleEntriesPromise;
 
-    // 4. From this new history, determine the new list of items that will be displayed.
-    const newItems = isHistoryContext
-        ? newHistory
-        : newHistory.filter(h => h.pairingVerified === false && h.declaration && h.freight);
-    
-    // 5. Determine the ID of the next item to navigate to.
-    let nextItemId: string | null = null;
-    if (newItems.length > 0) {
-        const nextIndex = Math.min(rejectedItemIndex, newItems.length - 1);
-        if (nextIndex >= 0) {
-            nextItemId = newItems[nextIndex].id;
-        }
-    }
+    // 5. Update the main history state.
+    setHistory(prev => 
+        [...newSingleEntries, ...prev.filter(e => e.id !== entryId)]
+        .sort((a, b) => new Date(b.analyzedAt).getTime() - new Date(a.analyzedAt).getTime())
+    );
 
-    // 6. Update state.
-    setHistory(newHistory);
-    
-    // 7. Finally, perform navigation if we were viewing the rejected item.
-    if (fullscreenViewData?.selectedId === entryId) {
-        if (nextItemId) {
-            handleFullscreenNavigate(nextItemId);
-        } else {
-            handleCloseFullscreen();
-        }
+    // 6. Navigate to the next item in the queue or close if it was the last one.
+    if (nextItemId) {
+      handleFullscreenNavigate(nextItemId);
+    } else {
+      handleCloseFullscreen();
     }
-  }, [history, fullscreenViewData, handleCloseFullscreen, handleFullscreenNavigate]);
+  }, [history, handleCloseFullscreen, handleFullscreenNavigate]);
 
   const handleCreatePair = useCallback(async (id1: string, id2: string) => {
         const entry1 = history.find(e => e.id === id1); // From Slot 1 (Declaration)
@@ -189,33 +178,15 @@ function App() {
         const file1 = sortedFiles[i];
         const file2 = i + 1 < sortedFiles.length ? sortedFiles[i + 1] : null;
 
-        const entry: { declaration?: DocumentInfo; freight?: DocumentInfo } = {};
-        
-        const isFile1Beyan = file1.fileName.toLowerCase().includes('beyan');
-        const isFile2Beyan = file2?.fileName.toLowerCase().includes('beyan');
-
         if (file2) {
-            if (isFile1Beyan && !isFile2Beyan) {
-                entry.declaration = file1;
-                entry.freight = file2;
-                i += 2;
-            } else if (!isFile1Beyan && isFile2Beyan) {
-                entry.declaration = file2;
-                entry.freight = file1;
-                i += 2;
-            } else {
-                // If both are beyan or neither are, just pair them in order.
-                entry.declaration = file1;
-                entry.freight = file2;
-                i += 2;
-            }
+            // Strict sequential pairing: first file is declaration, second is freight.
+            newEntriesData.push({ declaration: file1, freight: file2 });
+            i += 2;
         } else {
-            // Last file is single
-            entry.declaration = file1; // Default to declaration, user can fix in pairing.
+            // Last file is single. Assign it as a declaration by default.
+            newEntriesData.push({ declaration: file1 });
             i += 1;
         }
-        
-        newEntriesData.push(entry);
     }
 
     if (newEntriesData.length > 0) {
@@ -238,80 +209,51 @@ function App() {
     const originalEntry = history.find(e => e.id === entryId);
     if (!originalEntry) return;
 
-    const analysisItems = history.filter(h => h.pairingVerified === false && h.declaration && h.freight)
-        .sort((a, b) => {
-            const nameA = a.declaration?.fileName || a.freight?.fileName || '';
-            const nameB = b.declaration?.fileName || b.freight?.fileName || '';
-            return nameA.localeCompare(nameB, 'tr', { numeric: true });
-        });
-    const originalIndex = analysisItems.findIndex(item => item.id === entryId);
-
-    // --- Zipper/Slide Logic: Re-pair the entire tail of the sequence ---
-    if (isAnalysisContext && originalIndex >= 0 && originalIndex < analysisItems.length) {
-        // 1. Flatten the document sequence starting from the current item.
-        const allDocsInSequence = analysisItems.slice(originalIndex)
-            .flatMap(entry => [entry.declaration, entry.freight].filter((d): d is DocumentInfo => !!d));
+    if (isAnalysisContext) {
+        // --- Zipper/Slide Logic: Re-pair the entire tail of the sequence ---
+        const analysisItems = history.filter(h => h.pairingVerified === false && h.declaration && h.freight)
+            .sort((a, b) => {
+                const nameA = a.declaration!.fileName;
+                const nameB = b.declaration!.fileName;
+                return nameA.localeCompare(nameB, 'tr', { numeric: true });
+            });
         
-        const docToDelete = docTypeToDelete === 'declaration' ? originalEntry.declaration! : originalEntry.freight!;
-        
-        // 2. Remove the deleted document to get the new sequence for re-pairing.
-        const remainingDocs = allDocsInSequence.filter(d => d.id !== docToDelete.id);
+        const originalIndex = analysisItems.findIndex(item => item.id === entryId);
 
-        // If removing the doc leaves the sequence empty, fallback to simple break-pair.
-        if (remainingDocs.length > 0) {
-            // 3. Delete all old pairs that are being replaced.
-            const oldEntryIdsToDelete = analysisItems.slice(originalIndex).map(e => e.id);
+        if (originalIndex !== -1) {
+            const tailItems = analysisItems.slice(originalIndex);
+            const docsInTail = tailItems.flatMap(entry => [entry.declaration!, entry.freight!]);
+            const oldEntryIdsToDelete = tailItems.map(e => e.id);
+            const docToDelete = docTypeToDelete === 'declaration' ? originalEntry.declaration! : originalEntry.freight!;
+            const remainingDocsForReparing = docsInTail.filter(d => d.id !== docToDelete.id);
+
             await historyService.deleteMultipleHistoryEntries(oldEntryIdsToDelete);
-            
-            // 4. Add the deleted document as a new single entry for manual pairing.
             const singleDeletedEntry = await historyService.addHistoryEntry(
                 docTypeToDelete === 'declaration' ? { declaration: docToDelete } : { freight: docToDelete },
                 { pairingVerified: undefined }
             );
 
-            // 5. Create new pairs/singles from the remaining documents.
             const newEntriesData: { declaration?: DocumentInfo; freight?: DocumentInfo; }[] = [];
             let i = 0;
-            while (i < remainingDocs.length) {
-                const file1 = remainingDocs[i];
-                const file2 = i + 1 < remainingDocs.length ? remainingDocs[i + 1] : null;
-                const entry: { declaration?: DocumentInfo; freight?: DocumentInfo } = {};
-                
+            while (i < remainingDocsForReparing.length) {
+                const file1 = remainingDocsForReparing[i];
+                const file2 = i + 1 < remainingDocsForReparing.length ? remainingDocsForReparing[i + 1] : null;
                 if (file2) {
-                    const isFile1Beyan = file1.fileName.toLowerCase().includes('beyan');
-                    const isFile2Beyan = file2.fileName.toLowerCase().includes('beyan');
-                    if (isFile1Beyan && !isFile2Beyan) {
-                        entry.declaration = file1;
-                        entry.freight = file2;
-                    } else if (!isFile1Beyan && isFile2Beyan) {
-                        entry.declaration = file2;
-                        entry.freight = file1;
-                    } else {
-                        entry.declaration = file1;
-                        entry.freight = file2;
-                    }
+                    newEntriesData.push({ declaration: file1, freight: file2 });
                     i += 2;
                 } else {
-                    const isFile1Beyan = file1.fileName.toLowerCase().includes('beyan');
-                     if (isFile1Beyan) {
-                        entry.declaration = file1;
-                     } else {
-                        entry.freight = file1;
-                     }
+                    newEntriesData.push({ declaration: file1 });
                     i += 1;
                 }
-                newEntriesData.push(entry);
             }
-
             const newEntries = await Promise.all(newEntriesData.map(data => {
                 const isSingleDoc = !data.declaration || !data.freight;
                 return historyService.addHistoryEntry(data, isSingleDoc ? { pairingVerified: undefined } : { pairingVerified: false });
             }));
-            
-            // 6. Update state and navigate.
+
             setHistory(prev => {
                 const oldIdsToDeleteSet = new Set(oldEntryIdsToDelete);
-                let newHist = prev.filter(e => !oldIdsToDeleteSet.has(e.id));
+                const newHist = prev.filter(e => !oldIdsToDeleteSet.has(e.id));
                 newHist.push(singleDeletedEntry, ...newEntries);
                 return newHist.sort((a, b) => new Date(b.analyzedAt).getTime() - new Date(a.analyzedAt).getTime());
             });
@@ -322,63 +264,32 @@ function App() {
             } else {
                 handleCloseFullscreen();
             }
-            return; // Exit after handling the zipper logic.
+            return;
         }
     }
     
-    // --- Fallback Logic: Break pair into two singles (for History context or last item in Analysis) ---
-    const docToDeleteInfo = docTypeToDelete === 'declaration' ? originalEntry.declaration : originalEntry.freight;
+    // --- Fallback/History Context Logic: Break pair into a single ---
     const docToKeepInfo = docTypeToDelete === 'declaration' ? originalEntry.freight : originalEntry.declaration;
     
-    if (!docToDeleteInfo) return;
+    if (!docToKeepInfo) { // If only one doc exists, just delete the whole entry.
+      await handleDeleteHistoryEntry(entryId);
+      handleCloseFullscreen();
+      return;
+    }
 
-    // 1. Create a new entry for the deleted document
-    const newSingleEntryPromise = historyService.addHistoryEntry(
-        docTypeToDelete === 'declaration' ? { declaration: docToDeleteInfo } : { freight: docToDeleteInfo },
-        { pairingVerified: undefined }
-    );
-    
-    // 2. Update the original entry to only contain the kept document
     const updatedOriginalEntry = {
         ...originalEntry,
         declaration: docToKeepInfo === originalEntry.declaration ? docToKeepInfo : undefined,
         freight: docToKeepInfo === originalEntry.freight ? docToKeepInfo : undefined,
-        pairingVerified: undefined,
+        pairingVerified: undefined, // It's now a single, unpaired document
     };
-    const updateOriginalPromise = historyService.updateHistoryEntry(updatedOriginalEntry);
     
-    const [newSingleEntry] = await Promise.all([newSingleEntryPromise, updateOriginalPromise]);
+    await handleUpdateHistoryEntry(updatedOriginalEntry);
 
-    // Manually construct the new history state for navigation calculation
-    const newHistory = [...history.map(e => e.id === entryId ? updatedOriginalEntry : e), newSingleEntry]
-        .sort((a, b) => new Date(b.analyzedAt).getTime() - new Date(a.analyzedAt).getTime());
-    
-    // Navigation Logic
-    const currentItems = isAnalysisContext ? analysisItems : history;
-    const originalItemIndex = currentItems.findIndex(item => item.id === entryId);
-    
-    const newItems = isAnalysisContext
-        ? newHistory.filter(h => h.pairingVerified === false && h.declaration && h.freight)
-        : newHistory;
-
-    let nextItemId = null;
-    if (newItems.length > 0) {
-        const nextIndex = Math.min(originalItemIndex, newItems.length - 1);
-        if (nextIndex >= 0 && nextIndex < newItems.length) {
-            nextItemId = newItems[nextIndex].id;
-        }
+    if (fullscreenViewData?.selectedId === entryId) {
+       handleCloseFullscreen();
     }
-
-    setHistory(newHistory);
-
-    if (fullscreenViewData?.selectedId === entryId && isAnalysisContext) {
-        if (nextItemId) {
-            handleFullscreenNavigate(nextItemId);
-        } else {
-            handleCloseFullscreen();
-        }
-    }
-}, [history, fullscreenViewData, handleCloseFullscreen, handleFullscreenNavigate]);
+}, [history, fullscreenViewData, handleCloseFullscreen, handleFullscreenNavigate, handleUpdateHistoryEntry, handleDeleteHistoryEntry]);
 
 
   const navigateAndCloseSidebar = (targetPage: Page) => {
@@ -422,13 +333,18 @@ function App() {
   const getFullscreenItems = () => {
       if (!fullscreenViewData) return [];
       
-      // When entering from the history page or "Edit" button, show all documents.
       if (fullscreenViewData.context === 'history') {
           return history;
       }
-
-      // For the 'analysis' context, only show the unverified pairs.
-      return history.filter(h => h.pairingVerified === false && h.declaration && h.freight);
+      
+      // For the 'analysis' context (verification queue), only show unverified pairs in a stable order.
+      return history
+          .filter(h => h.pairingVerified === false && h.declaration && h.freight)
+          .sort((a, b) => {
+            const nameA = a.declaration!.fileName;
+            const nameB = b.declaration!.fileName;
+            return nameA.localeCompare(nameB, 'tr', { numeric: true });
+          });
   };
 
   return (
