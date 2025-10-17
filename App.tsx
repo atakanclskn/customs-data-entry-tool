@@ -386,6 +386,7 @@ function App() {
             context={fullscreenViewData.context}
             onRejectPairing={handleRejectPairing}
             onDeleteFromPair={handleDeleteFromPair}
+            onNavigate={navigateAndCloseSidebar}
         />
       )}
     </div>

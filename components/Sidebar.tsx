@@ -46,16 +46,15 @@ const NavItem: React.FC<NavItemProps> = ({ icon, label, page, currentPage, onNav
 };
 
 const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, isOpen, setIsOpen, theme, onThemeChange, history, onOpenInFullscreen, isCollapsed, onToggle }) => {
-  // The history is sorted by date descending, so the first item is the most recent.
-  const mostRecentItem = history.length > 0 ? history[0] : null;
-  const isRecentItemPaired = !!(mostRecentItem?.declaration && mostRecentItem?.freight);
+  // Find the most recent paired item. The history is sorted by date descending.
+  const mostRecentPairedItem = history.find(item => item.declaration && item.freight);
 
   const handleEditClick = () => {
-    if (mostRecentItem && isRecentItemPaired) {
+    if (mostRecentPairedItem) {
       // Determine the correct context: unverified pairs go to the 'analysis' (verification) view.
-      const isUnverifiedPair = mostRecentItem.pairingVerified === false;
+      const isUnverifiedPair = mostRecentPairedItem.pairingVerified === false;
       const context = isUnverifiedPair ? 'analysis' : 'history';
-      onOpenInFullscreen(context, mostRecentItem.id);
+      onOpenInFullscreen(context, mostRecentPairedItem.id);
       setIsOpen(false);
     }
   };
@@ -90,9 +89,9 @@ const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, isOpen, setI
             <li title={isCollapsed ? "Düzenle" : ''}>
                 <button
                     onClick={handleEditClick}
-                    disabled={!isRecentItemPaired}
+                    disabled={!mostRecentPairedItem}
                     className={`w-full flex items-center p-3 rounded-lg transition-all duration-200 ease-in-out text-text-secondary hover:text-text-primary hover:bg-[var(--color-background)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-text-secondary ${isCollapsed ? 'justify-center' : 'space-x-4'}`}
-                    title={isCollapsed ? "Düzenle" : (!isRecentItemPaired ? "Önce bir çift belge yükleyin" : "En son belgeyi düzenleyicide aç")}
+                    title={isCollapsed ? "Düzenle" : (!mostRecentPairedItem ? "Önce bir çift belge yükleyin" : "En son belgeyi düzenleyicide aç")}
                 >
                     <ExpandIcon className="w-6 h-6"/>
                     <span className={`font-semibold ${isCollapsed ? 'hidden' : 'inline'}`}>Düzenle</span>

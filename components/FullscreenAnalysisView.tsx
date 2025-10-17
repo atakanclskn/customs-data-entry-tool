@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { DeclarationData, HistoryEntry } from '../types';
+import { DeclarationData, HistoryEntry, Page } from '../types';
 import {
     XIcon, PanelLeftIcon, SearchIcon, ArrowUpIcon, ArrowDownIcon, ChevronLeftIcon,
     ChevronRightIcon, SaveIcon, UndoIcon, RedoIcon, ErrorIcon, CheckCircleIcon,
-    ZoomInIcon, ZoomOutIcon, BadgeCheckIcon, DownloadIcon,
+    ZoomInIcon, ZoomOutIcon, BadgeCheckIcon, DownloadIcon, LinkIcon,
     RotateCcwIcon, RotateCwIcon, XCircleIcon, TrashIcon, GripVerticalIcon, FileIcon
 } from './Icons';
 import * as XLSX from 'xlsx';
-import { FIELD_LABELS, FREIGHT_FIELDS, EXCEL_EXPORT_ORDER } from '../constants';
+import { FIELD_LABELS, FREIGHT_FIELDS, EXCEL_EXPORT_ORDER, PREDEFINED_TESLIM_SEKLI_LIST } from '../constants';
 import CustomSelect from './CustomSelect';
 import { PREDEFINED_NAKLIYECI_LIST } from '../services/nakliyeciData';
 import { ALICI_VKN_MAP } from '../services/aliciData';
@@ -18,6 +18,13 @@ const dateFields = new Set([
   'Tahmini Çıkış Tarihi',
   'Varış Tarihi',
   'KAYIT TARİHİ'
+]);
+
+const fieldsToHideFromUI = new Set([
+  'Öykü Dönem Navlun w/m',
+  'D.Ö.',
+  'Varış Limanı',
+  'Total Fark w/m'
 ]);
 
 // --- Custom Hook for Undo/Redo State ---
@@ -95,8 +102,9 @@ interface EditableFieldProps {
     readOnly?: boolean;
     datalistId?: string;
     datalistOptions?: string[];
+    validationError?: string;
 }
-const EditableField: React.FC<EditableFieldProps> = ({ label, value, onChange, onActivate, isActive, setRef, isEven, readOnly = false, datalistId, datalistOptions = [] }) => {
+const EditableField: React.FC<EditableFieldProps> = ({ label, value, onChange, onActivate, isActive, setRef, isEven, readOnly = false, datalistId, datalistOptions = [], validationError }) => {
     const [isEditing, setIsEditing] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
     const displayLabel = FIELD_LABELS[label] || label;
@@ -135,7 +143,7 @@ const EditableField: React.FC<EditableFieldProps> = ({ label, value, onChange, o
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         let newValue = e.target.value;
         if (label === 'ALICI VKN') {
-            newValue = newValue.replace(/\D/g, '');
+            newValue = newValue.replace(/\D/g, '').slice(0, 15);
         } else if (isDateField) {
             const digits = newValue.replace(/\D/g, '').slice(0, 8);
             if (digits.length > 4) {
@@ -145,6 +153,8 @@ const EditableField: React.FC<EditableFieldProps> = ({ label, value, onChange, o
             } else {
                 newValue = digits;
             }
+        } else {
+            newValue = newValue.toLocaleUpperCase('tr-TR');
         }
         onChange(newValue);
     };
@@ -153,8 +163,13 @@ const EditableField: React.FC<EditableFieldProps> = ({ label, value, onChange, o
         return (
             <div ref={setRef} className={`flex items-baseline gap-x-2 border-l-2 py-1 px-2 rounded-md border-transparent ${isEven ? 'bg-[var(--color-background)]' : 'bg-transparent'}`}>
                 <p className="text-2xs text-text-muted font-medium whitespace-nowrap w-1/4 truncate" title={displayLabel}>{displayLabel}</p>
-                <div className="flex-grow w-3/4">
-                    <p className="text-2xs font-medium text-text-primary break-words p-0">{value || <span className="italic text-text-muted">N/A</span>}</p>
+                <div className="flex-grow w-3/4 flex items-center gap-1">
+                    <p className="text-2xs font-medium text-text-primary break-words p-0 flex-grow">{value || <span className="italic text-text-muted">N/A</span>}</p>
+                     {validationError && (
+                        <div title={validationError}>
+                            <ErrorIcon className="w-3 h-3 text-[var(--color-danger)] flex-shrink-0" />
+                        </div>
+                    )}
                 </div>
             </div>
         );
@@ -163,30 +178,37 @@ const EditableField: React.FC<EditableFieldProps> = ({ label, value, onChange, o
     return (
         <div ref={setRef} className={`flex items-baseline gap-x-2 border-l-2 py-1 px-2 transition-colors rounded-md ${isActive ? 'bg-accent/10 border-accent' : 'border-transparent'} ${isEven ? 'bg-[var(--color-background)]' : 'bg-transparent'}`} onDoubleClick={handleActivate}>
             <p className="text-2xs text-text-muted font-medium whitespace-nowrap w-1/4 truncate" title={displayLabel}>{displayLabel}</p>
-            <div className="flex-grow w-3/4">
-                {isEditing ? (
-                    <>
-                    <input
-                        ref={inputRef}
-                        type={isDateField || label === 'ALICI VKN' ? 'tel' : 'text'}
-                        inputMode={isDateField || label === 'ALICI VKN' ? 'numeric' : 'text'}
-                        value={value}
-                        onChange={handleInputChange}
-                        onBlur={handleBlur}
-                        onKeyDown={handleKeyDown}
-                        className="w-full bg-transparent border-b border-accent text-2xs font-medium p-0 focus:outline-none"
-                        list={datalistId}
-                    />
-                    {datalistId && datalistOptions.length > 0 && (
-                        <datalist id={datalistId}>
-                            {datalistOptions.map(opt => <option key={opt} value={opt} />)}
-                        </datalist>
+            <div className="flex-grow w-3/4 flex items-center gap-1">
+                <div className="flex-grow">
+                    {isEditing ? (
+                        <>
+                        <input
+                            ref={inputRef}
+                            type={isDateField || label === 'ALICI VKN' ? 'tel' : 'text'}
+                            inputMode={isDateField || label === 'ALICI VKN' ? 'numeric' : 'text'}
+                            value={value}
+                            onChange={handleInputChange}
+                            onBlur={handleBlur}
+                            onKeyDown={handleKeyDown}
+                            className="w-full bg-transparent border-b border-accent text-2xs font-medium p-0 focus:outline-none"
+                            list={datalistId}
+                        />
+                        {datalistId && datalistOptions.length > 0 && (
+                            <datalist id={datalistId}>
+                                {datalistOptions.map(opt => <option key={opt} value={opt} />)}
+                            </datalist>
+                        )}
+                        </>
+                    ) : (
+                        <p className="text-2xs font-medium text-text-primary break-words cursor-pointer hover:bg-accent/10 p-0 rounded-sm" onClick={handleActivate}>
+                            {value || <span className="italic text-[var(--color-danger)] font-semibold">Boş</span>}
+                        </p>
                     )}
-                    </>
-                ) : (
-                    <p className="text-2xs font-medium text-text-primary break-words cursor-pointer hover:bg-accent/10 p-0 rounded-sm" onClick={handleActivate}>
-                        {value || <span className="italic text-[var(--color-danger)] font-semibold">Boş</span>}
-                    </p>
+                </div>
+                {validationError && (
+                    <div title={validationError}>
+                        <ErrorIcon className="w-3 h-3 text-[var(--color-danger)] flex-shrink-0" />
+                    </div>
                 )}
             </div>
         </div>
@@ -205,6 +227,7 @@ interface FullscreenAnalysisViewProps {
     context: 'analysis' | 'history';
     onRejectPairing: (entryId: string) => Promise<void>;
     onDeleteFromPair: (entryId: string, docTypeToDelete: 'declaration' | 'freight') => Promise<void>;
+    onNavigate: (page: Page) => void;
 }
 
 type SortKey = 'analyzedAt' | 'fileName' | 'verified';
@@ -221,7 +244,7 @@ const extractedFieldsOrder = [
   'TAREKS-TARIM-TSE',
 ];
 
-const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, history, selectedId, onClose, onUpdateEntry, onNavigateItem, context, onRejectPairing, onDeleteFromPair }) => {
+const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, history, selectedId, onClose, onUpdateEntry, onNavigateItem, context, onRejectPairing, onDeleteFromPair, onNavigate }) => {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [sortConfig, setSortConfig] = useState<{key: SortKey, direction: 'asc' | 'desc'}>({ key: 'fileName', direction: 'asc' });
@@ -285,7 +308,8 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
     const fieldRefs = useRef<Record<string, HTMLElement | null>>({});
     const allFieldKeys = useMemo(() => {
         const declarationFields = extractedFieldsOrder.filter(f => f !== 'TAREKS-TARIM-TSE');
-        return [...declarationFields, 'TAREKS-TARIM-TSE', ...FREIGHT_FIELDS];
+        const visibleFreightFields = FREIGHT_FIELDS.filter(key => !fieldsToHideFromUI.has(key));
+        return [...declarationFields, 'TAREKS-TARIM-TSE', ...visibleFreightFields];
     }, []);
     
     useEffect(() => {
@@ -434,7 +458,7 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
         const updatedEntry = { 
             ...currentItem, 
             data: editedData,
-            verified: localVerified,
+            verified: true,
         };
         await onUpdateEntry(updatedEntry);
         setSaveState('saved');
@@ -504,9 +528,20 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
 
     const handleConfirmPairing = async () => {
         if (!currentItem) return;
+
+        const currentIndex = items.findIndex(item => item.id === currentItem.id);
+        const nextItem = (currentIndex !== -1 && currentIndex + 1 < items.length) 
+            ? items[currentIndex + 1] 
+            : null;
+
         const updatedEntry = { ...currentItem, pairingVerified: true };
         await onUpdateEntry(updatedEntry);
-        setIsVerifyingPairing(false); // Transition to data entry mode
+        
+        if (nextItem) {
+            onNavigateItem(nextItem.id);
+        } else {
+            onClose();
+        }
     };
 
     const handleVerificationToggle = () => {
@@ -551,6 +586,14 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
             .filter((value): value is string => !!value && value.trim() !== '');
         
         return [...new Set([...predefined, ...fromHistory])].sort((a, b) => a.localeCompare(b, 'tr'));
+    }, [history]);
+    
+    const teslimSekliDatalistOptions = useMemo(() => {
+        const fromHistory = history
+            .map(item => item.data?.['Teslim şekli'])
+            .filter((value): value is string => !!value && value.trim() !== '');
+        
+        return [...new Set([...PREDEFINED_TESLIM_SEKLI_LIST, ...fromHistory])].sort((a, b) => a.localeCompare(b, 'tr'));
     }, [history]);
 
     useEffect(() => {
@@ -637,16 +680,26 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
             const scaleAmount = -e.deltaY * 0.001;
             const newScale = Math.max(0.1, prev.scale + scaleAmount);
             const ratio = newScale / prev.scale;
+
             const newX = mouseX - ratio * (mouseX - prev.x);
             const newY = mouseY - ratio * (mouseY - prev.y);
+
             return { scale: newScale, x: newX, y: newY };
         });
+    };
+
+    const getVknError = (vkn: string | undefined): string | undefined => {
+        if (vkn && vkn.length > 0 && vkn.length !== 10 && vkn.length !== 11) {
+            return "Vergi kimlik numarası 10 veya 11 haneli olmalıdır.";
+        }
+        return undefined;
     };
     
     if (!currentItem) {
         return ( <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center text-white"> <p>Yükleniyor...</p> </div> );
     }
 
+    const isSingleDocument = !currentItem.declaration || !currentItem.freight;
     const tareksIndex = extractedFieldsOrder.filter(k => k !== 'TAREKS-TARIM-TSE').length;
 
     const sortOptions = [{ value: 'analyzedAt', label: 'Tarih' }, { value: 'fileName', label: 'Dosya Adı' }, { value: 'verified', label: 'Onay Durumu' }];
@@ -715,7 +768,7 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
                 <header className="flex-shrink-0 h-16 bg-[var(--color-background-light)] border-b border-[var(--color-border)] flex items-center justify-between px-4">
                     <div className="flex items-center gap-2">
                         <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 rounded-full hover:bg-[var(--color-background)]" title="Kenar Çubuğunu Gizle/Göster"><PanelLeftIcon className="w-5 h-5"/></button>
-                        {!isVerifyingPairing && (
+                        {!isVerifyingPairing && !isSingleDocument && (
                            <>
                             <button onClick={handleSave} disabled={!isDirty || saveState === 'saved'} className={`btn ${isDirty ? 'btn-primary' : 'btn-secondary'} w-32`}>
                                 <SaveIcon className="w-5 h-5"/>
@@ -755,13 +808,43 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
                                  </div>
                                  <p className="text-xs text-text-muted mt-6">Sadece bir belge yanlışsa, belge önizlemesindeki çöp kutusu simgesini kullanarak onu kaldırabilirsiniz.</p>
                              </div>
+                         ) : isSingleDocument ? (
+                            <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center animate-fade-in">
+                                <LinkIcon className="w-16 h-16 text-accent mb-4" />
+                                <h2 className="text-3xl font-bold text-text-primary">Bu Belge Eşleştirilmemiş</h2>
+                                <p className="text-text-secondary my-4">Bu tek bir belgedir. Veri girişi yapabilmek için öncelikle bu belgeyi başka bir belge ile eşleştirmeniz gerekmektedir.</p>
+                                <button onClick={() => onNavigate(Page.PAIRING)} className="btn btn-primary text-lg !py-3 mt-4">
+                                    Eşleştirme Sayfasına Git
+                                </button>
+                            </div>
                          ) : (
                             <div className="flex-1 overflow-y-auto min-h-0 pr-2">
                                 <h4 className="text-base font-bold text-center text-text-primary border-b border-border pb-2 mb-2">Beyanname Bilgileri</h4>
                                 <div className="space-y-0">
-                                    {extractedFieldsOrder.filter(k => k !== 'TAREKS-TARIM-TSE').map((key, index) => (
-                                        <EditableField key={key} label={key} value={editedData[key] || ''} onChange={(newValue) => setEditedData(prev => ({ ...prev, [key]: newValue }))} onActivate={setActiveFieldLabel} isActive={activeFieldLabel === key} setRef={(el) => { fieldRefs.current[key] = el; }} isEven={index % 2 === 0} datalistId={key === 'SON AMBAR' ? 'son-ambar-list' : undefined} datalistOptions={key === 'SON AMBAR' ? sonAmbarDatalistOptions : undefined} />
-                                    ))}
+                                    {extractedFieldsOrder.filter(k => k !== 'TAREKS-TARIM-TSE').map((key, index) => {
+                                        const validationError = key === 'ALICI VKN' ? getVknError(editedData[key]) : undefined;
+                                        return (
+                                            <EditableField 
+                                                key={key} 
+                                                label={key} 
+                                                value={editedData[key] || ''} 
+                                                onChange={(newValue) => setEditedData(prev => ({ ...prev, [key]: newValue }))} 
+                                                onActivate={setActiveFieldLabel} 
+                                                isActive={activeFieldLabel === key} 
+                                                setRef={(el) => { fieldRefs.current[key] = el; }} 
+                                                isEven={index % 2 === 0} 
+                                                datalistId={
+                                                    key === 'SON AMBAR' ? 'son-ambar-list' :
+                                                    key === 'Teslim şekli' ? 'teslim-sekli-list' : undefined
+                                                } 
+                                                datalistOptions={
+                                                    key === 'SON AMBAR' ? sonAmbarDatalistOptions :
+                                                    key === 'Teslim şekli' ? teslimSekliDatalistOptions : undefined
+                                                }
+                                                validationError={validationError}
+                                            />
+                                        )
+                                    })}
                                     <div ref={(el) => { fieldRefs.current['TAREKS-TARIM-TSE'] = el; }} key="TAREKS-TARIM-TSE" className={`flex items-baseline gap-x-2 border-l-2 py-1 px-2 transition-colors rounded-md ${activeFieldLabel === 'TAREKS-TARIM-TSE' ? 'bg-accent/10 border-accent' : 'border-transparent'} ${tareksIndex % 2 === 0 ? 'bg-[var(--color-background)]' : 'bg-transparent'}`} onMouseDown={() => setActiveFieldLabel('TAREKS-TARIM-TSE')}>
                                         <p className="text-2xs text-text-muted font-medium whitespace-nowrap w-1/4 truncate">{FIELD_LABELS['TAREKS-TARIM-TSE']}</p>
                                         <div className="flex items-center gap-4 w-3/4">
@@ -772,10 +855,10 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
                                 </div>
                                 <h4 className="text-base font-bold text-center text-text-primary border-b border-border pb-2 mt-4 mb-2">Navlun Faturası Bilgileri</h4>
                                 <div className="space-y-0">
-                                    {FREIGHT_FIELDS.map((key, index) => ( <EditableField key={key} label={key} value={editedData[key] || ''} onChange={(newValue) => setEditedData(prev => ({ ...prev, [key]: newValue }))} onActivate={setActiveFieldLabel} isActive={activeFieldLabel === key} setRef={(el) => { fieldRefs.current[key] = el; }} isEven={index % 2 === 0} readOnly={key === 'TT' || key === 'w/m navlun' || key === 'KAYIT TARİHİ'} datalistId={key === 'Nakliyeci' ? 'nakliyeci-list' : undefined} datalistOptions={key === 'Nakliyeci' ? nakliyeciOptions : undefined} /> ))}
+                                    {FREIGHT_FIELDS.filter(key => !fieldsToHideFromUI.has(key)).map((key, index) => ( <EditableField key={key} label={key} value={editedData[key] || ''} onChange={(newValue) => setEditedData(prev => ({ ...prev, [key]: newValue }))} onActivate={setActiveFieldLabel} isActive={activeFieldLabel === key} setRef={(el) => { fieldRefs.current[key] = el; }} isEven={index % 2 === 0} readOnly={key === 'TT' || key === 'w/m navlun' || key === 'KAYIT TARİHİ'} datalistId={key === 'Nakliyeci' ? 'nakliyeci-list' : undefined} datalistOptions={key === 'Nakliyeci' ? nakliyeciOptions : undefined} /> ))}
                                 </div>
                             </div>
-                        )}
+                         )}
                     </div>
 
                     <div onMouseDown={!isMobile ? handleMouseDown : undefined} className="hidden md:flex items-center justify-center w-3 h-full cursor-col-resize group transition-colors bg-[var(--color-background)] hover:bg-accent/10 flex-shrink-0"><GripVerticalIcon className="w-6 h-6 text-border group-hover:text-accent transition-colors" /></div>
@@ -791,7 +874,7 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
                                     <button onClick={() => handleZoom('declaration', 'out')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Uzaklaş"><ZoomOutIcon className="w-5 h-5"/></button>
                                     <button onClick={() => handleZoom('declaration', 'reset')} className="px-2 py-1.5 rounded-md hover:bg-border text-xs font-bold" title="Sıfırla">1:1</button>
                                     <button onClick={() => handleZoom('declaration', 'in')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Yakınlaş"><ZoomInIcon className="w-5 h-5"/></button>
-                                    {isVerifyingPairing && <button onClick={() => handleDeleteClick('declaration')} className="p-1.5 rounded-md text-text-muted hover:bg-danger/20 hover:text-danger transition-colors" title="Bu belgeyi sil"><TrashIcon className="w-5 h-5"/></button>}
+                                    {(isVerifyingPairing || (currentItem.declaration && currentItem.freight)) && <button onClick={() => handleDeleteClick('declaration')} className="p-1.5 rounded-md text-text-muted hover:bg-danger/20 hover:text-danger transition-colors" title="Bu belgeyi sil"><TrashIcon className="w-5 h-5"/></button>}
                                 </div>}
                             </div>
                             <div ref={declarationViewerRef} className="flex-1 bg-border/20 rounded-lg overflow-hidden relative" onWheel={(e) => currentItem.declaration && handleWheelZoom(e, 'declaration')}>
@@ -818,7 +901,7 @@ const FullscreenAnalysisView: React.FC<FullscreenAnalysisViewProps> = ({ items, 
                                     <button onClick={() => handleZoom('freight', 'out')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Uzaklaş"><ZoomOutIcon className="w-5 h-5"/></button>
                                     <button onClick={() => handleZoom('freight', 'reset')} className="px-2 py-1.5 rounded-md hover:bg-border text-xs font-bold" title="Sıfırla">1:1</button>
                                     <button onClick={() => handleZoom('freight', 'in')} className="p-1.5 rounded-md hover:bg-border transition-colors" title="Yakınlaş"><ZoomInIcon className="w-5 h-5"/></button>
-                                    {isVerifyingPairing && <button onClick={() => handleDeleteClick('freight')} className="p-1.5 rounded-md text-text-muted hover:bg-danger/20 hover:text-danger transition-colors" title="Bu belgeyi sil"><TrashIcon className="w-5 h-5"/></button>}
+                                    {(isVerifyingPairing || (currentItem.declaration && currentItem.freight)) && <button onClick={() => handleDeleteClick('freight')} className="p-1.5 rounded-md text-text-muted hover:bg-danger/20 hover:text-danger transition-colors" title="Bu belgeyi sil"><TrashIcon className="w-5 h-5"/></button>}
                                 </div>}
                             </div>
                              <div ref={freightViewerRef} className="flex-1 bg-border/20 rounded-lg overflow-hidden relative" onWheel={(e) => currentItem.freight && handleWheelZoom(e, 'freight')}>

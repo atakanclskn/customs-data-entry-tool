@@ -63,6 +63,20 @@ export const FIELD_LABELS: { [key: string]: string } = {
   'KAYIT TARİHİ': 'Kayıt Tarihi',
 };
 
+export const PREDEFINED_TESLIM_SEKLI_LIST = [
+  'EXW', // Ex Works
+  'FCA', // Free Carrier
+  'FAS', // Free Alongside Ship
+  'FOB', // Free On Board
+  'CPT', // Carriage Paid To
+  'CIP', // Carriage and Insurance Paid To
+  'CFR', // Cost and Freight
+  'CIF', // Cost, Insurance and Freight
+  'DAP', // Delivered at Place
+  'DPU', // Delivered at Place Unloaded
+  'DDP',  // Delivered Duty Paid
+];
+
 export const EXCEL_EXPORT_ORDER = [
   'Beyanname Dosya Adı', 
   'Navlun Dosya Adı', 
